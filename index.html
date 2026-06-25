@@ -724,6 +724,7 @@ const FORM_DEFS = {
       {key:'name',label:'Nome',type:'text',placeholder:'Ex: Aluguel'},
       {key:'amount',label:'Valor (R$)',type:'number'},
       {key:'category',label:'Categoria',type:'catselect'},
+      {key:'linkedDebt',label:'Amortizar qual dívida? (Opcional)',type:'debtselect'}, // <-- NOVO CAMPO
       {key:'once',label:'Frequência',type:'select',options:[['false','Mensal'],['true','Única vez']]},
       {key:'start',label:'Mês início (vazio = já ativo)',type:'month'},
       {key:'end',label:'Mês fim (vazio = sem fim)',type:'month'},
@@ -783,6 +784,13 @@ function buildFixedForm(kind, editId){
     } else if (f.type==='catselect'){
       html+=`<select data-f="${f.key}">`;
       CATEGORIES.forEach(c=>{ html+=`<option value="${c.id}" ${val===c.id?'selected':''}>${c.name}</option>`; });
+      html+=`</select>`;
+    } else if (f.type==='debtselect'){
+      html+=`<select data-f="${f.key}">
+        <option value="">-- Nenhuma (Despesa normal) --</option>`;
+      state.debts.forEach(d=>{
+        html+=`<option value="${d.id}" ${val===d.id?'selected':''}>${escHtml(d.name)}</option>`;
+      });
       html+=`</select>`;
     } else if (f.type === 'month') {
       const [valY, valM] = (val || '').split('-');
@@ -916,25 +924,69 @@ function renderAnual(){
 // PROJECTION
 // ================================================================
 function getSnapshot(ym){
-  const income=state.incomes.filter(e=>isActive(e,ym)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-  const expense=state.expenses.filter(e=>isActive(e,ym)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-  const debtTotal=state.debts.reduce((s,d)=>s+(parseFloat(d.balance)||0),0);
-  const debtPayment=state.debts.reduce((s,d)=>s+(parseFloat(d.payment)||0),0);
+  const income = state.incomes.filter(e=>isActive(e,ym)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+  
+  // Despesas normais (ignora as que estão vinculadas a dívidas)
+  const expense = state.expenses
+    .filter(e=>isActive(e,ym) && !e.linkedDebt)
+    .reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    
+  const debtTotal = state.debts.reduce((s,d)=>s+(parseFloat(d.balance)||0),0);
+  
+  // Pagamento de dívidas = parcelas legadas + despesas vinculadas ativas no mês
+  let debtPayment = state.debts.reduce((s,d)=>s+(parseFloat(d.payment)||0),0);
+  debtPayment += state.expenses
+    .filter(e=>isActive(e,ym) && e.linkedDebt)
+    .reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    
   return {ym, income, expense, debtTotal, debtPayment, sobra:income-expense-debtPayment};
 }
 
 function projectMonths(n, startYM){
-  const debtSt = state.debts.map(d=>({name:d.name, balance:parseFloat(d.balance)||0, payment:parseFloat(d.payment)||0, rate:(parseFloat(d.rate)||0)/100}));
+  const debtSt = state.debts.map(d=>({
+    id: d.id, name:d.name, balance:parseFloat(d.balance)||0, 
+    payment:parseFloat(d.payment)||0, rate:(parseFloat(d.rate)||0)/100
+  }));
   let cumul=0;
   const out=[];
+  
   for (let i=0;i<n;i++){
     const ym=addMonths(startYM,i);
     const income=state.incomes.filter(e=>isActive(e,ym)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-    const expense=state.expenses.filter(e=>isActive(e,ym)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-    let debtPay=0;
-    debtSt.forEach(d=>{
-      if (d.balance>0.01){ const wi=d.balance*(1+d.rate); const pay=Math.min(d.payment,wi); d.balance=Math.max(0,wi-pay); debtPay+=pay; }
+    
+    let expense = 0;
+    let debtPay = 0;
+
+    // 1. Aplica juros do mês nas dívidas
+    debtSt.forEach(d => {
+      if (d.balance > 0.01) d.balance *= (1 + d.rate);
     });
+
+    // 2. Desconta as parcelas fixas cadastradas direto na dívida (código legado)
+    debtSt.forEach(d => {
+      if (d.balance > 0.01 && d.payment > 0){
+        const pay = Math.min(d.payment, d.balance);
+        d.balance = Math.max(0, d.balance - pay);
+        debtPay += pay;
+      }
+    });
+
+    // 3. Processa as Despesas Fixas (Normais e Vinculadas)
+    state.expenses.filter(e=>isActive(e,ym)).forEach(e => {
+      const val = parseFloat(e.amount)||0;
+      if (e.linkedDebt) {
+        const linked = debtSt.find(d => d.id === e.linkedDebt);
+        if (linked && linked.balance > 0.01) {
+          // Math.min trava o pagamento! Se a parcela for 1350 mas só faltar 600, ele só abate e cobra 600.
+          const amort = Math.min(val, linked.balance); 
+          linked.balance = Math.max(0, linked.balance - amort);
+          debtPay += amort;
+        }
+      } else {
+        expense += val;
+      }
+    });
+
     const debtsRem=debtSt.reduce((s,d)=>s+d.balance,0);
     const net=income-expense-debtPay;
     cumul+=net;
