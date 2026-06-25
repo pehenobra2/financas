@@ -784,6 +784,23 @@ function buildFixedForm(kind, editId){
       html+=`<select data-f="${f.key}">`;
       CATEGORIES.forEach(c=>{ html+=`<option value="${c.id}" ${val===c.id?'selected':''}>${c.name}</option>`; });
       html+=`</select>`;
+    } else if (f.type === 'month') {
+      const [valY, valM] = (val || '').split('-');
+      const anoAtual = new Date().getFullYear();
+      const anoInicio = 2026; // Ano base de início do app
+      const anosNoFuturo = 20; // Quantidade de anos adiante que quer projetar
+      const listaAnos = Array.from({ length: (anoAtual + anosNoFuturo) - anoInicio + 1 }, (_, i) => anoInicio + i);
+
+      html += `<div style="display:flex;gap:8px;">
+        <select data-f="${f.key}_m" style="flex:1">
+          <option value="">Mês</option>
+          ${['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => `<option value="${m}" ${valM===m?'selected':''}>${MONTHS_ABBR[i]}</option>`).join('')}
+        </select>
+        <select data-f="${f.key}_y" style="flex:1">
+          <option value="">Ano</option>
+          ${listaAnos.map(y => `<option value="${y}" ${String(valY)===String(y)?'selected':''}>${y}</option>`).join('')}
+        </select>
+      </div>`;
     } else {
       html+=`<input data-f="${f.key}" type="${f.type}" step="0.01" placeholder="${f.placeholder||''}" value="${val===undefined?'':val}">`;
     }
@@ -800,11 +817,17 @@ function buildFixedForm(kind, editId){
     e.preventDefault();
     const data=existing?Object.assign({},existing):{id:uid()};
     def.fields.forEach(f=>{
-      const input=formEl.querySelector('[data-f="'+f.key+'"]');
-      let v=input.value;
-      if (f.type==='number') v=v===''?0:parseFloat(v);
-      if (f.key==='once') v=(v==='true');
-      data[f.key]=v;
+      if (f.type === 'month') {
+        const m = formEl.querySelector('[data-f="'+f.key+'_m"]').value;
+        const y = formEl.querySelector('[data-f="'+f.key+'_y"]').value;
+        data[f.key] = (m && y) ? `${y}-${m}` : '';
+      } else {
+        const input=formEl.querySelector('[data-f="'+f.key+'"]');
+        let v=input.value;
+        if (f.type==='number') v=v===''?0:parseFloat(v);
+        if (f.key==='once') v=(v==='true');
+        data[f.key]=v;
+      }
     });
     if (existing){ const idx=state[def.key].findIndex(x=>x.id===existing.id); state[def.key][idx]=data; }
     else { state[def.key].push(data); }
