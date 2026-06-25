@@ -361,9 +361,24 @@ footer button { font-family: 'Inter', sans-serif; font-size: 11px; background: n
   </footer>
 </div>
 
-<script>
-(function(){
+<script type="module">
 'use strict';
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDLpmieHlaS9SYg1AXWsTycMqrge2qnmIM",
+  authDomain: "financas-9f151.firebaseapp.com",
+  databaseURL: "https://financas-9f151-default-rtdb.firebaseio.com",
+  projectId: "financas-9f151",
+  storageBucket: "financas-9f151.appspot.com",
+  messagingSenderId: "COPIE_DO_SEU_PRINT",
+  appId: "COPIE_DO_SEU_PRINT"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
 // ================================================================
 // CATEGORIES
@@ -424,13 +439,22 @@ let state = {
 };
 
 function loadState(){
-  try {
-    const raw = localStorage.getItem('fin_v2');
-    if (raw) state = Object.assign({incomes:[],expenses:[],debts:[],transactions:[],budgets:{}}, JSON.parse(raw));
-  } catch(e){}
+  const dbRef = ref(db, 'financas_casal');
+  // onValue fica "escutando" o banco. Se você ou sua noiva alterarem algo, a tela do outro atualiza na hora!
+  onValue(dbRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data) {
+      state = Object.assign({incomes:[],expenses:[],debts:[],transactions:[],budgets:{}}, data);
+    } else {
+      state = {incomes:[],expenses:[],debts:[],transactions:[],budgets:{}};
+    }
+    renderAll();
+  });
 }
+
 function saveState(){
-  localStorage.setItem('fin_v2', JSON.stringify(state));
+  // Salva no banco de dados nas nuvens
+  set(ref(db, 'financas_casal'), state);
 }
 loadState();
 
@@ -1019,7 +1043,6 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
 // ================================================================
 renderAll();
 
-})();
 </script>
 </body>
 </html>
