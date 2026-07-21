@@ -192,15 +192,81 @@ footer button { font-family: 'Inter', sans-serif; font-size: 11px; background: n
 .plan-num-value { font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 600; }
 .plan-num-value.green { color: var(--teal); }
 .plan-num-value.red { color: var(--rust); }
+
+/* ---- LOGIN ---- */
+.login-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.login-box { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 28px 26px; width: 100%; max-width: 340px; }
+.login-box h1 { font-size: 22px; margin-bottom: 4px; }
+.login-box p.hint { font-size: 12.5px; color: var(--ink-soft); margin-bottom: 18px; }
+.login-error { font-size: 12.5px; color: var(--rust); margin-top: 4px; min-height: 16px; }
+.hidden { display: none !important; }
+
+/* ---- VIEW SELECTOR (Eu / Parceira / Casal) ---- */
+.view-nav { display: flex; gap: 4px; background: var(--line); border-radius: 8px; padding: 3px; margin-bottom: 16px; width: fit-content; }
+.view-nav button { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12.5px; background: none; border: none; border-radius: 6px; padding: 7px 14px; cursor: pointer; color: var(--ink-soft); }
+.view-nav button.active { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
+
+/* ---- OWNER TAG ---- */
+.owner-tag { font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+.owner-tag.eu { background: var(--blue-soft); color: var(--blue); }
+.owner-tag.parceira { background: var(--purple-soft); color: var(--purple); }
+.owner-tag.casal { background: var(--teal-soft); color: var(--teal); }
+
+/* ---- RESERVE CARD ---- */
+.reserve-box { display: flex; justify-content: space-between; align-items: center; background: var(--gold-soft); border: 1px solid #e6d6a8; border-radius: var(--r); padding: 12px 16px; margin-bottom: 18px; }
+.reserve-box .rlabel { font-size: 12px; color: #6b5215; }
+.reserve-box .rval { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 600; color: #6b5215; }
+
+/* ---- INVOICE HINT ---- */
+.invoice-hint { font-size: 11.5px; color: var(--teal); background: var(--teal-soft); border-radius: 6px; padding: 6px 9px; margin-top: -2px; }
+
+/* ---- USER BAR ---- */
+.user-bar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 11.5px; color: var(--ink-soft); }
+.user-bar button { font-family: 'Inter', sans-serif; font-size: 11.5px; background: none; border: none; color: var(--rust); text-decoration: underline; cursor: pointer; }
 </style>
 </head>
 <body>
-<div class="app">
+
+<!-- ===== LOGIN SCREEN ===== -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <h1>Planejamento Financeiro</h1>
+    <p class="hint">Acesso restrito. Entre com o usuário admin do casal.</p>
+    <form id="loginForm" class="entry-form" style="border-top:none;padding-top:0;margin-top:0;">
+      <div><label class="flabel">E-mail</label><input type="email" id="loginEmail" autocomplete="username" required></div>
+      <div><label class="flabel">Senha</label><input type="password" id="loginPassword" autocomplete="current-password" required></div>
+      <div class="login-error" id="loginError"></div>
+      <div class="form-actions"><button type="submit" class="primary">Entrar</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="app hidden" id="appRoot">
+
+  <div class="user-bar">
+    <span id="userEmailLabel"></span>
+    <button id="logoutBtn">Sair</button>
+  </div>
 
   <div class="header">
     <p class="eyebrow">FINANÇAS PESSOAIS</p>
     <h1>Planejamento Financeiro</h1>
     <p class="header-sub" id="headerSub">Carregando…</p>
+  </div>
+
+  <!-- VIEW SELECTOR -->
+  <div class="view-nav" id="viewNav">
+    <button data-view="casal" class="active">Casal</button>
+    <button data-view="eu">Eu</button>
+    <button data-view="parceira">Parceira</button>
+  </div>
+
+  <!-- RESERVE (só aparece em Eu / Parceira) -->
+  <div class="reserve-box hidden" id="reserveBox">
+    <div>
+      <div class="rlabel" id="reserveLabel">Reserva pessoal do mês</div>
+    </div>
+    <div class="rval" id="reserveVal">—</div>
   </div>
 
   <!-- MONTH NAVIGATOR -->
@@ -311,6 +377,21 @@ footer button { font-family: 'Inter', sans-serif; font-size: 11px; background: n
         </div>
       </div>
     </div>
+
+    <div class="section-title">Cartões de crédito</div>
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:10px;">Cadastre o dia de fechamento de cada cartão. Ao lançar uma despesa no cartão, o sistema calcula sozinho em qual fatura ela cai.</p>
+        <div id="cardList"></div>
+        <button class="add-toggle" data-add="card">+ Adicionar cartão</button>
+        <div id="cardFormWrap"></div>
+      </div>
+    </div>
+
+    <div class="section-title">Reserva pessoal mensal</div>
+    <div class="card">
+      <div class="card-body" id="reserveConfig"></div>
+    </div>
   </div>
 
   <!-- ===== TAB: ANUAL ===== -->
@@ -359,13 +440,14 @@ footer button { font-family: 'Inter', sans-serif; font-size: 11px; background: n
     &nbsp;
     <button id="resetBtn" style="color:var(--rust)">Limpar tudo</button>
   </footer>
-</div>
+</div><!-- /#appRoot -->
 
 <script type="module">
 'use strict';
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDLpmieHlaS9SYg1AXWsTycMqrge2qnmIM",
@@ -379,6 +461,44 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
+const auth = getAuth(app);
+
+// ================================================================
+// AUTENTICAÇÃO (usuário admin único, single-tenant)
+// ================================================================
+setPersistence(auth, browserLocalPersistence).catch(()=>{});
+
+const loginScreen = document.getElementById('loginScreen');
+const appRoot = document.getElementById('appRoot');
+const loginForm = document.getElementById('loginForm');
+const loginError = document.getElementById('loginError');
+
+loginForm.addEventListener('submit', (e)=>{
+  e.preventDefault();
+  loginError.textContent = '';
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  signInWithEmailAndPassword(auth, email, password).catch(err=>{
+    loginError.textContent = 'E-mail ou senha inválidos.';
+  });
+});
+
+document.getElementById('logoutBtn').addEventListener('click', ()=>{
+  signOut(auth);
+});
+
+let appStarted = false;
+onAuthStateChanged(auth, (user)=>{
+  if (user){
+    loginScreen.classList.add('hidden');
+    appRoot.classList.remove('hidden');
+    document.getElementById('userEmailLabel').textContent = user.email || '';
+    if (!appStarted){ appStarted = true; loadState(); }
+  } else {
+    appRoot.classList.add('hidden');
+    loginScreen.classList.remove('hidden');
+  }
+});
 
 // ================================================================
 // CATEGORIES
@@ -393,8 +513,16 @@ const CATEGORIES = [
   { id:'vestuario',    name:'Vestuário',    color:'#7A4A1A', bg:'#F0E4D5' },
   { id:'assinaturas',  name:'Assinaturas',  color:'#4A5568', bg:'#E8ECF0' },
   { id:'investimento', name:'Investimento', color:'#276749', bg:'#D4EDE0' },
+  { id:'reserva',      name:'Reserva Pessoal', color:'#A07820', bg:'#F0E8D4' },
   { id:'outros',       name:'Outros',       color:'#6B7570', bg:'#EEF0EE' },
 ];
+const OWNERS = [
+  { id:'casal',    name:'Casal' },
+  { id:'eu',       name:'Eu' },
+  { id:'parceira', name:'Parceira' },
+];
+function ownerById(id){ return OWNERS.find(o=>o.id===id)||OWNERS[0]; }
+function ownerMatch(o){ o = o || 'casal'; return currentView==='casal' ? true : o===currentView; }
 function catById(id){ return CATEGORIES.find(c=>c.id===id)||CATEGORIES[CATEGORIES.length-1]; }
 
 // ================================================================
@@ -430,13 +558,17 @@ function escHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&
 // STATE
 // ================================================================
 let currentYM = ymOf(new Date());
-let state = {
-  incomes: [],   // {id, name, amount, start, end, once}
-  expenses: [],  // {id, name, amount, category, start, end, once}
-  debts: [],     // {id, name, balance, payment, rate}
-  transactions: [], // {id, date, name, amount, type:'income'|'expense', category}
+let currentView = 'casal'; // 'casal' | 'eu' | 'parceira'
+const STATE_DEFAULTS = {
+  incomes: [],   // {id, name, amount, start, end, once, owner}
+  expenses: [],  // {id, name, amount, category, start, end, once, owner, linkedDebt}
+  debts: [],     // {id, name, balance, payment, rate, owner}
+  transactions: [], // {id, date, name, amount, type:'income'|'expense', category, owner, paymentMethod, cardId, effectiveYM}
   budgets: {},   // {categoryId: limit}
+  cards: [],     // {id, name, closingDay, owner}
+  reserves: { eu: 0, parceira: 0 }, // reserva mensal de gasto pessoal
 };
+let state = JSON.parse(JSON.stringify(STATE_DEFAULTS));
 
 function loadState(){
   const dbRef = ref(db, 'financas_casal');
@@ -444,9 +576,10 @@ function loadState(){
   onValue(dbRef, (snapshot) => {
     const data = snapshot.val();
     if (data) {
-      state = Object.assign({incomes:[],expenses:[],debts:[],transactions:[],budgets:{}}, data);
+      state = Object.assign(JSON.parse(JSON.stringify(STATE_DEFAULTS)), data);
+      if (!state.reserves) state.reserves = { eu: 0, parceira: 0 };
     } else {
-      state = {incomes:[],expenses:[],debts:[],transactions:[],budgets:{}};
+      state = JSON.parse(JSON.stringify(STATE_DEFAULTS));
     }
     renderAll();
   });
@@ -456,7 +589,7 @@ function saveState(){
   // Salva no banco de dados nas nuvens
   set(ref(db, 'financas_casal'), state);
 }
-loadState();
+// loadState() é chamado pelo onAuthStateChanged, depois do login
 
 // ================================================================
 // MONTH NAVIGATION
@@ -464,6 +597,32 @@ loadState();
 document.getElementById('prevMonth').addEventListener('click',()=>{ currentYM=addMonths(currentYM,-1); renderAll(); });
 document.getElementById('nextMonth').addEventListener('click',()=>{ currentYM=addMonths(currentYM,1); renderAll(); });
 document.getElementById('todayBtn').addEventListener('click',()=>{ currentYM=ymOf(new Date()); renderAll(); });
+
+// ================================================================
+// VIEW SELECTOR (Casal / Eu / Parceira)
+// ================================================================
+document.querySelectorAll('#viewNav [data-view]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    currentView = btn.dataset.view;
+    document.querySelectorAll('#viewNav [data-view]').forEach(b=>b.classList.toggle('active', b===btn));
+    renderAll();
+  });
+});
+
+function renderReserveBox(){
+  const box = document.getElementById('reserveBox');
+  if (currentView==='casal'){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const fixedReserve = (parseFloat(state.reserves && state.reserves[currentView]) || 0);
+  const spent = txOfMonth(currentYM)
+    .filter(t=>t.type==='expense' && t.category==='reserva' && (t.owner||'casal')===currentView)
+    .reduce((s,t)=>s+(t.amount||0),0);
+  const remaining = fixedReserve - spent;
+  document.getElementById('reserveLabel').textContent =
+    `Reserva pessoal do mês (${ownerById(currentView).name}) · gasto: ${money(spent)} de ${money(fixedReserve)}`;
+  document.getElementById('reserveVal').textContent = money(remaining);
+  document.getElementById('reserveVal').style.color = remaining < 0 ? 'var(--rust)' : '#6b5215';
+}
 
 // ================================================================
 // TABS
@@ -481,8 +640,20 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
 // ================================================================
 // TRANSACTIONS (lançamentos reais)
 // ================================================================
+function effectiveYMOf(t){
+  // Para lançamentos de cartão, o "mês" é o mês da fatura, não o mês da compra.
+  return t.effectiveYM || (t.date ? t.date.slice(0,7) : '');
+}
 function txOfMonth(ym){
-  return state.transactions.filter(t=>t.date && t.date.startsWith(ym));
+  return state.transactions.filter(t=>effectiveYMOf(t)===ym && ownerMatch(t.owner));
+}
+// Calcula em qual fatura uma compra de cartão cai, com base no dia de fechamento
+function faturaDoMes(dataStr, diaFechamento){
+  if (!dataStr) return '';
+  const [y,m,d] = dataStr.split('-').map(Number);
+  let year=y, month=m;
+  if (d > diaFechamento){ month+=1; if (month>12){ month=1; year+=1; } }
+  return year+'-'+pad(month);
 }
 
 function renderTxList(){
@@ -498,11 +669,13 @@ function renderTxList(){
     const day = t.date ? t.date.slice(8) : '--';
     const cls = t.type==='income'?'positive':'negative';
     const prefix = t.type==='income'?'+':'-';
+    const card = t.cardId ? state.cards.find(c=>c.id===t.cardId) : null;
+    const cardNote = card ? ` · cartão ${escHtml(card.name)}` : '';
     return `<div class="tx-row" data-txedit="${t.id}">
       <div class="tx-date">${escHtml(day)}</div>
       <div class="tx-main">
-        <div class="tx-name">${escHtml(t.name||'sem nome')}</div>
-        <div class="tx-cat"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${cat.color};margin-right:4px;"></span>${escHtml(cat.name)}</div>
+        <div class="tx-name">${escHtml(t.name||'sem nome')}<span class="owner-tag ${t.owner||'casal'}">${ownerById(t.owner).name}</span></div>
+        <div class="tx-cat"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${cat.color};margin-right:4px;"></span>${escHtml(cat.name)}${cardNote}</div>
       </div>
       <div class="tx-amount ${cls}">${prefix}${money(t.amount)}</div>
     </div>`;
@@ -517,6 +690,9 @@ function buildTxForm(editId){
   const wrap = document.getElementById('txFormWrap');
   const today = (new Date()).toISOString().slice(0,10);
   const catOpts = CATEGORIES.map(c=>`<option value="${c.id}" ${(existing&&existing.category===c.id)?'selected':''}>${c.name}</option>`).join('');
+  const ownerOpts = OWNERS.map(o=>`<option value="${o.id}" ${(existing?existing.owner===o.id:(currentView!=='casal'?currentView===o.id:o.id==='casal'))?'selected':''}>${o.name}</option>`).join('');
+  const cardOpts = state.cards.map(c=>`<option value="${c.id}" ${(existing&&existing.cardId===c.id)?'selected':''}>${escHtml(c.name)} (fecha dia ${c.closingDay})</option>`).join('');
+  const payMethod = existing ? (existing.paymentMethod||'dinheiro') : 'dinheiro';
   wrap.innerHTML = `<form class="entry-form" id="txForm">
     <div class="form-row">
       <div><label class="flabel">Tipo</label>
@@ -525,12 +701,26 @@ function buildTxForm(editId){
           <option value="income" ${(existing&&existing.type==='income')?'selected':''}>Receita</option>
         </select>
       </div>
-      <div><label class="flabel">Data</label><input data-f="date" type="date" value="${existing?existing.date:today}"></div>
+      <div><label class="flabel">Data da compra/recebimento</label><input data-f="date" type="date" value="${existing?existing.date:today}"></div>
     </div>
     <div><label class="flabel">Descrição</label><input data-f="name" type="text" placeholder="Ex: Supermercado" value="${escHtml(existing?existing.name:'')}"></div>
     <div class="form-row">
       <div><label class="flabel">Valor (R$)</label><input data-f="amount" type="number" step="0.01" value="${existing?existing.amount:''}"></div>
       <div><label class="flabel">Categoria</label><select data-f="category">${catOpts}</select></div>
+    </div>
+    <div class="form-row">
+      <div><label class="flabel">Forma de pagamento</label>
+        <select data-f="paymentMethod" id="txPayMethod">
+          <option value="dinheiro" ${payMethod==='dinheiro'?'selected':''}>Dinheiro / Débito / Pix</option>
+          <option value="cartao" ${payMethod==='cartao'?'selected':''}>Cartão de crédito</option>
+        </select>
+      </div>
+      <div><label class="flabel">De quem é</label><select data-f="owner">${ownerOpts}</select></div>
+    </div>
+    <div id="txCardWrap" class="${payMethod==='cartao'?'':'hidden'}">
+      <label class="flabel">Cartão</label>
+      ${state.cards.length ? `<select data-f="cardId">${cardOpts}</select>` : `<div class="empty">Nenhum cartão cadastrado. Cadastre um em "Cadastros → Cartões" primeiro.</div>`}
+      <div class="invoice-hint" id="txInvoiceHint"></div>
     </div>
     <div class="form-actions">
       <button type="submit" class="primary">${existing?'Salvar':'Adicionar'}</button>
@@ -539,14 +729,42 @@ function buildTxForm(editId){
     </div>
   </form>`;
   const form = document.getElementById('txForm');
+
+  function updateInvoiceHint(){
+    const method = form.querySelector('[data-f="paymentMethod"]').value;
+    document.getElementById('txCardWrap').classList.toggle('hidden', method!=='cartao');
+    if (method!=='cartao' || !state.cards.length) return;
+    const cardSel = form.querySelector('[data-f="cardId"]');
+    const dateVal = form.querySelector('[data-f="date"]').value;
+    const card = state.cards.find(c=>c.id===cardSel.value);
+    const hint = document.getElementById('txInvoiceHint');
+    if (card && dateVal){
+      const ym = faturaDoMes(dateVal, parseInt(card.closingDay)||1);
+      hint.textContent = `→ Vai para a fatura de ${ymToFull(ym)}`;
+    } else { hint.textContent = ''; }
+  }
+  form.querySelector('[data-f="paymentMethod"]').addEventListener('change', updateInvoiceHint);
+  form.querySelector('[data-f="date"]').addEventListener('change', updateInvoiceHint);
+  if (form.querySelector('[data-f="cardId"]')) form.querySelector('[data-f="cardId"]').addEventListener('change', updateInvoiceHint);
+  updateInvoiceHint();
+
   form.addEventListener('submit',e=>{
     e.preventDefault();
     const data = existing ? Object.assign({},existing) : {id:uid()};
-    ['type','date','name','amount','category'].forEach(f=>{
+    ['type','date','name','amount','category','paymentMethod','owner'].forEach(f=>{
       let v = form.querySelector('[data-f="'+f+'"]').value;
       if (f==='amount') v = parseFloat(v)||0;
       data[f] = v;
     });
+    const cardSel = form.querySelector('[data-f="cardId"]');
+    if (data.paymentMethod==='cartao' && cardSel){
+      data.cardId = cardSel.value;
+      const card = state.cards.find(c=>c.id===data.cardId);
+      data.effectiveYM = card ? faturaDoMes(data.date, parseInt(card.closingDay)||1) : data.date.slice(0,7);
+    } else {
+      data.cardId = '';
+      data.effectiveYM = data.date ? data.date.slice(0,7) : '';
+    }
     if (existing){
       const idx = state.transactions.findIndex(t=>t.id===existing.id);
       state.transactions[idx]=data;
@@ -605,11 +823,11 @@ function renderCatSummary(){
 function renderOrcamento(){
   document.getElementById('planMonthLabel').textContent = ymToFull(currentYM);
   const txs = txOfMonth(currentYM);
-  const incomeFixed = state.incomes.filter(e=>isActive(e,currentYM)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+  const incomeFixed = state.incomes.filter(e=>isActive(e,currentYM) && ownerMatch(e.owner)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
   const incomeReal = txs.filter(t=>t.type==='income').reduce((s,t)=>s+(t.amount||0),0);
   const totalIncome = incomeFixed + incomeReal;
-  const expenseFixed = state.expenses.filter(e=>isActive(e,currentYM)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-  const debtPay = state.debts.reduce((s,d)=>s+(parseFloat(d.payment)||0),0);
+  const expenseFixed = state.expenses.filter(e=>isActive(e,currentYM) && ownerMatch(e.owner)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+  const debtPay = state.debts.filter(d=>ownerMatch(d.owner)).reduce((s,d)=>s+(parseFloat(d.payment)||0),0);
   const expenseReal = txs.filter(t=>t.type==='expense').reduce((s,t)=>s+(t.amount||0),0);
   const totalExpense = expenseFixed + debtPay + expenseReal;
   const saldo = totalIncome - totalExpense;
@@ -714,6 +932,7 @@ const FORM_DEFS = {
     fields:[
       {key:'name',label:'Nome',type:'text',placeholder:'Ex: Salário'},
       {key:'amount',label:'Valor mensal (R$)',type:'number'},
+      {key:'owner',label:'De quem é',type:'ownerselect'},
       {key:'start',label:'Começa em (vazio = já ativo)',type:'month'},
       {key:'end',label:'Termina em (vazio = sem fim)',type:'month'},
     ]
@@ -724,6 +943,7 @@ const FORM_DEFS = {
       {key:'name',label:'Nome',type:'text',placeholder:'Ex: Aluguel'},
       {key:'amount',label:'Valor (R$)',type:'number'},
       {key:'category',label:'Categoria',type:'catselect'},
+      {key:'owner',label:'De quem é',type:'ownerselect'},
       {key:'linkedDebt',label:'Amortizar qual dívida? (Opcional)',type:'debtselect'}, // <-- NOVO CAMPO
       {key:'once',label:'Frequência',type:'select',options:[['false','Mensal'],['true','Única vez']]},
       {key:'start',label:'Mês início (vazio = já ativo)',type:'month'},
@@ -737,6 +957,15 @@ const FORM_DEFS = {
       {key:'balance',label:'Saldo devedor (R$)',type:'number'},
       {key:'payment',label:'Parcela mensal (R$)',type:'number'},
       {key:'rate',label:'Juros mensal (%) — opcional',type:'number'},
+      {key:'owner',label:'De quem é',type:'ownerselect'},
+    ]
+  },
+  card:{
+    wrap:'cardFormWrap', list:'cardList', key:'cards',
+    fields:[
+      {key:'name',label:'Nome do cartão',type:'text',placeholder:'Ex: Nubank'},
+      {key:'closingDay',label:'Dia de fechamento da fatura',type:'number',placeholder:'Ex: 15'},
+      {key:'owner',label:'De quem é',type:'ownerselect'},
     ]
   }
 };
@@ -744,7 +973,7 @@ const FORM_DEFS = {
 function renderFixed(kind){
   const def=FORM_DEFS[kind];
   const el=document.getElementById(def.list);
-  const items=state[def.key];
+  const items=state[def.key].filter(it=> kind==='card' ? true : ownerMatch(it.owner));
   if (!items.length){ el.innerHTML=`<div class="empty">Nenhum cadastro ainda.</div>`; return; }
   el.innerHTML = items.map(it=>{
     let amount, meta, cls;
@@ -754,9 +983,11 @@ function renderFixed(kind){
       const cat=catById(it.category);
       meta=`<span style="color:${cat.color}">${cat.name}</span>`;
       cls='negative';
-    } else { amount=money(it.balance)+' restante'; meta=`parcela ${money(it.payment)}/mês`; cls='negative'; }
+    } else if (kind==='card'){ amount=`fecha dia ${it.closingDay}`; meta='cartão de crédito'; cls=''; }
+    else { amount=money(it.balance)+' restante'; meta=`parcela ${money(it.payment)}/mês`; cls='negative'; }
+    const ownerTag = kind!=='card' ? `<span class="owner-tag ${it.owner||'casal'}">${ownerById(it.owner).name}</span>` : '';
     return `<div class="item-row clickable" data-edit="${kind}:${it.id}">
-      <div class="item-main"><div class="item-name">${escHtml(it.name||'sem nome')}</div><div class="item-meta">${meta}</div></div>
+      <div class="item-main"><div class="item-name">${escHtml(it.name||'sem nome')}${ownerTag}</div><div class="item-meta">${meta}</div></div>
       <div class="item-amount ${cls}">${amount}</div>
     </div>`;
   }).join('');
@@ -791,6 +1022,11 @@ function buildFixedForm(kind, editId){
       state.debts.forEach(d=>{
         html+=`<option value="${d.id}" ${val===d.id?'selected':''}>${escHtml(d.name)}</option>`;
       });
+      html+=`</select>`;
+    } else if (f.type==='ownerselect'){
+      const defaultOwner = existing ? existing.owner : (currentView!=='casal' ? currentView : 'casal');
+      html+=`<select data-f="${f.key}">`;
+      OWNERS.forEach(o=>{ html+=`<option value="${o.id}" ${defaultOwner===o.id?'selected':''}>${o.name}</option>`; });
       html+=`</select>`;
     } else if (f.type === 'month') {
       const [valY, valM] = (val || '').split('-');
@@ -854,6 +1090,27 @@ document.querySelectorAll('[data-add]').forEach(btn=>{
 });
 
 // ================================================================
+// RESERVA PESSOAL (config)
+// ================================================================
+function renderReserveConfigBox(){
+  const el = document.getElementById('reserveConfig');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="form-row">
+      <div><label class="flabel">Reserva mensal — Eu (R$)</label><input type="number" step="10" id="reserveEu" value="${state.reserves.eu||''}" placeholder="Ex: 500"></div>
+      <div><label class="flabel">Reserva mensal — Parceira (R$)</label><input type="number" step="10" id="reserveParceira" value="${state.reserves.parceira||''}" placeholder="Ex: 500"></div>
+    </div>
+    <div class="form-actions" style="margin-top:8px;">
+      <button class="primary" id="saveReserveBtn">Salvar reserva</button>
+    </div>`;
+  document.getElementById('saveReserveBtn').addEventListener('click', ()=>{
+    state.reserves.eu = parseFloat(document.getElementById('reserveEu').value)||0;
+    state.reserves.parceira = parseFloat(document.getElementById('reserveParceira').value)||0;
+    saveState(); renderAll();
+  });
+}
+
+// ================================================================
 // ANNUAL VIEW
 // ================================================================
 function renderAnual(){
@@ -899,7 +1156,7 @@ function renderAnual(){
 
   // Annual category breakdown
   const bycat = {};
-  state.transactions.filter(t=>t.type==='expense' && t.date && t.date.startsWith(year+'')).forEach(t=>{
+  state.transactions.filter(t=>t.type==='expense' && effectiveYMOf(t).startsWith(year+'') && ownerMatch(t.owner)).forEach(t=>{
     const cid=t.category||'outros';
     bycat[cid]=(bycat[cid]||0)+(t.amount||0);
   });
@@ -924,26 +1181,26 @@ function renderAnual(){
 // PROJECTION
 // ================================================================
 function getSnapshot(ym){
-  const income = state.incomes.filter(e=>isActive(e,ym)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+  const income = state.incomes.filter(e=>isActive(e,ym) && ownerMatch(e.owner)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
   
   // Despesas normais (ignora as que estão vinculadas a dívidas)
   const expense = state.expenses
-    .filter(e=>isActive(e,ym) && !e.linkedDebt)
+    .filter(e=>isActive(e,ym) && !e.linkedDebt && ownerMatch(e.owner))
     .reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
     
-  const debtTotal = state.debts.reduce((s,d)=>s+(parseFloat(d.balance)||0),0);
+  const debtTotal = state.debts.filter(d=>ownerMatch(d.owner)).reduce((s,d)=>s+(parseFloat(d.balance)||0),0);
   
   // Pagamento de dívidas = parcelas legadas + despesas vinculadas ativas no mês
-  let debtPayment = state.debts.reduce((s,d)=>s+(parseFloat(d.payment)||0),0);
+  let debtPayment = state.debts.filter(d=>ownerMatch(d.owner)).reduce((s,d)=>s+(parseFloat(d.payment)||0),0);
   debtPayment += state.expenses
-    .filter(e=>isActive(e,ym) && e.linkedDebt)
+    .filter(e=>isActive(e,ym) && e.linkedDebt && ownerMatch(e.owner))
     .reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
     
   return {ym, income, expense, debtTotal, debtPayment, sobra:income-expense-debtPayment};
 }
 
 function projectMonths(n, startYM){
-  const debtSt = state.debts.map(d=>({
+  const debtSt = state.debts.filter(d=>ownerMatch(d.owner)).map(d=>({
     id: d.id, name:d.name, balance:parseFloat(d.balance)||0, 
     payment:parseFloat(d.payment)||0, rate:(parseFloat(d.rate)||0)/100
   }));
@@ -952,7 +1209,7 @@ function projectMonths(n, startYM){
   
   for (let i=0;i<n;i++){
     const ym=addMonths(startYM,i);
-    const income=state.incomes.filter(e=>isActive(e,ym)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    const income=state.incomes.filter(e=>isActive(e,ym) && ownerMatch(e.owner)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
     
     let expense = 0;
     let debtPay = 0;
@@ -972,7 +1229,7 @@ function projectMonths(n, startYM){
     });
 
     // 3. Processa as Despesas Fixas (Normais e Vinculadas)
-    state.expenses.filter(e=>isActive(e,ym)).forEach(e => {
+    state.expenses.filter(e=>isActive(e,ym) && ownerMatch(e.owner)).forEach(e => {
       const val = parseFloat(e.amount)||0;
       if (e.linkedDebt) {
         const linked = debtSt.find(d => d.id === e.linkedDebt);
@@ -1002,10 +1259,13 @@ function renderProjecao(){
 
   // Banners
   const msgs=[];
-  if (!state.expenses.length && !state.transactions.length){
+  const expensesInView = state.expenses.filter(e=>ownerMatch(e.owner));
+  const txsInView = state.transactions.filter(t=>ownerMatch(t.owner));
+  const debtsInView = state.debts.filter(d=>ownerMatch(d.owner));
+  if (!expensesInView.length && !txsInView.length){
     msgs.push({ok:false,text:'⚠️ Nenhum gasto cadastrado ainda. Adicione despesas fixas ou lançamentos para um plano realista.'});
   }
-  if (state.debts.length){
+  if (debtsInView.length){
     const zi=proj.findIndex(m=>m.debtsRemaining<=0.01);
     if (zi>=0) msgs.push({ok:true,text:`🎉 No ritmo atual, suas dívidas zeram em ${ymToLabel(proj[zi].ym)}.`});
     else msgs.push({ok:false,text:'No ritmo atual, suas dívidas não zeram nos próximos 24 meses.'});
@@ -1066,6 +1326,7 @@ function buildChart(proj, baselineIncome){
 // MAIN RENDER
 // ================================================================
 function renderAll(){
+  renderReserveBox();
   renderStats();
   renderTxList();
   renderCatSummary();
@@ -1073,6 +1334,8 @@ function renderAll(){
   renderFixed('income');
   renderFixed('expense');
   renderFixed('debt');
+  renderFixed('card');
+  renderReserveConfigBox();
   renderAnual();
   renderProjecao();
 }
@@ -1096,7 +1359,7 @@ document.getElementById('importFile').addEventListener('change',(ev)=>{
     try{
       const parsed=JSON.parse(reader.result);
       if (!confirm('Isso vai SUBSTITUIR os dados atuais pelos do arquivo de backup. Confirma?')) return;
-      state=Object.assign({incomes:[],expenses:[],debts:[],transactions:[],budgets:{}}, parsed);
+      state=Object.assign(JSON.parse(JSON.stringify(STATE_DEFAULTS)), parsed);
       saveState();
       renderAll();
       alert('Backup importado com sucesso.');
@@ -1109,7 +1372,7 @@ document.getElementById('importFile').addEventListener('change',(ev)=>{
 });
 document.getElementById('resetBtn').addEventListener('click',()=>{
   if (!confirm('Apagar TODOS os dados (cadastros, lançamentos, orçamentos)?')) return;
-  state={incomes:[],expenses:[],debts:[],transactions:[],budgets:{}};
+  state=JSON.parse(JSON.stringify(STATE_DEFAULTS));
   saveState(); renderAll();
 });
 
