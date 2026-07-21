@@ -201,7 +201,7 @@ footer button { font-family: 'Inter', sans-serif; font-size: 11px; background: n
 .login-error { font-size: 12.5px; color: var(--rust); margin-top: 4px; min-height: 16px; }
 .hidden { display: none !important; }
 
-/* ---- VIEW SELECTOR (Eu / Parceira / Casal) ---- */
+/* ---- VIEW SELECTOR (Pedro / Sofia / Casal) ---- */
 .view-nav { display: flex; gap: 4px; background: var(--line); border-radius: 8px; padding: 3px; margin-bottom: 16px; width: fit-content; }
 .view-nav button { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12.5px; background: none; border: none; border-radius: 6px; padding: 7px 14px; cursor: pointer; color: var(--ink-soft); }
 .view-nav button.active { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
@@ -257,11 +257,11 @@ footer button { font-family: 'Inter', sans-serif; font-size: 11px; background: n
   <!-- VIEW SELECTOR -->
   <div class="view-nav" id="viewNav">
     <button data-view="casal" class="active">Casal</button>
-    <button data-view="eu">Eu</button>
-    <button data-view="parceira">Parceira</button>
+    <button data-view="eu">Pedro</button>
+    <button data-view="parceira">Sofia</button>
   </div>
 
-  <!-- RESERVE (só aparece em Eu / Parceira) -->
+  <!-- RESERVE (só aparece em Pedro / Sofia) -->
   <div class="reserve-box hidden" id="reserveBox">
     <div>
       <div class="rlabel" id="reserveLabel">Reserva pessoal do mês</div>
@@ -529,8 +529,8 @@ const CATEGORIES = [
 ];
 const OWNERS = [
   { id:'casal',    name:'Casal' },
-  { id:'eu',       name:'Eu' },
-  { id:'parceira', name:'Parceira' },
+  { id:'eu',       name:'Pedro' },
+  { id:'parceira', name:'Sofia' },
 ];
 function ownerById(id){ return OWNERS.find(o=>o.id===id)||OWNERS[0]; }
 function ownerMatch(o){ o = o || 'casal'; return currentView==='casal' ? true : o===currentView; }
@@ -610,7 +610,7 @@ document.getElementById('nextMonth').addEventListener('click',()=>{ currentYM=ad
 document.getElementById('todayBtn').addEventListener('click',()=>{ currentYM=ymOf(new Date()); renderAll(); });
 
 // ================================================================
-// VIEW SELECTOR (Casal / Eu / Parceira)
+// VIEW SELECTOR (Casal / Pedro / Sofia)
 // ================================================================
 document.querySelectorAll('#viewNav [data-view]').forEach(btn=>{
   btn.addEventListener('click', ()=>{
@@ -1108,8 +1108,8 @@ function renderReserveConfigBox(){
   if (!el) return;
   el.innerHTML = `
     <div class="form-row">
-      <div><label class="flabel">Reserva mensal — Eu (R$)</label><input type="number" step="10" id="reserveEu" value="${state.reserves.eu||''}" placeholder="Ex: 500"></div>
-      <div><label class="flabel">Reserva mensal — Parceira (R$)</label><input type="number" step="10" id="reserveParceira" value="${state.reserves.parceira||''}" placeholder="Ex: 500"></div>
+      <div><label class="flabel">Reserva mensal — Pedro (R$)</label><input type="number" step="10" id="reserveEu" value="${state.reserves.eu||''}" placeholder="Ex: 500"></div>
+      <div><label class="flabel">Reserva mensal — Sofia (R$)</label><input type="number" step="10" id="reserveParceira" value="${state.reserves.parceira||''}" placeholder="Ex: 500"></div>
     </div>
     <div class="form-actions" style="margin-top:8px;">
       <button class="primary" id="saveReserveBtn">Salvar reserva</button>
