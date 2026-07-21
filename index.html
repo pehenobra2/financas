@@ -479,7 +479,18 @@ loginForm.addEventListener('submit', (e)=>{
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
   signInWithEmailAndPassword(auth, email, password).catch(err=>{
-    loginError.textContent = 'E-mail ou senha inválidos.';
+    const code = err && err.code || '';
+    const MAP = {
+      'auth/unauthorized-domain': 'Esse endereço (domínio) não está autorizado no Firebase. Vá em Authentication → Configurações → Domínios autorizados e adicione este domínio.',
+      'auth/operation-not-allowed': 'O login por e-mail/senha ainda não está ativado. Vá em Authentication → Método de login e ative "E-mail/senha".',
+      'auth/invalid-email': 'Esse e-mail não está em um formato válido.',
+      'auth/user-not-found': 'Não existe usuário com esse e-mail. Confira em Authentication → Users.',
+      'auth/wrong-password': 'Senha incorreta para esse e-mail.',
+      'auth/invalid-credential': 'E-mail ou senha incorretos.',
+      'auth/too-many-requests': 'Muitas tentativas seguidas. Aguarde um pouco e tente de novo.',
+      'auth/network-request-failed': 'Falha de conexão com o Firebase. Confira sua internet.',
+    };
+    loginError.textContent = MAP[code] || ('Erro ao entrar' + (code ? ' (' + code + ')' : '') + '.');
   });
 });
 
