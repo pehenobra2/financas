@@ -266,8 +266,8 @@ const state = {
   lancamentos: {},
   metas: {},
   rendas: {},
-  recorrencias: {},
-  casamento: { dataCasamento:"", metaReservaMensal:0, reservaAcumulada:0, grupo1:{}, grupo2:{} }
+  contasFixas: {},
+  casamento: { dataCasamento:"", metaReservaMensal:0, reservaAcumulada:0 }
 };
 let view = "casal"; // 'pedro' | 'sofia' | 'casal'
 
@@ -312,11 +312,9 @@ function startListeners(){
   onValue(ref(db,'lancamentos'), s=>{ state.lancamentos = s.val()||{}; renderAll(); });
   onValue(ref(db,'metas'), s=>{ state.metas = s.val()||{}; renderAll(); });
   onValue(ref(db,'rendas'), s=>{ state.rendas = s.val()||{}; renderAll(); });
-  onValue(ref(db,'recorrencias'), s=>{ state.recorrencias = s.val()||{}; renderAll(); });
+  onValue(ref(db,'contasFixas'), s=>{ state.contasFixas = s.val()||{}; renderAll(); });
   onValue(ref(db,'casamento'), s=>{
-    state.casamento = s.val() || { dataCasamento:"", metaReservaMensal:0, reservaAcumulada:0, grupo1:{}, grupo2:{} };
-    state.casamento.grupo1 = state.casamento.grupo1 || {};
-    state.casamento.grupo2 = state.casamento.grupo2 || {};
+    state.casamento = s.val() || { dataCasamento:"", metaReservaMensal:0, reservaAcumulada:0 };
     state.casamento.reservaAcumulada = state.casamento.reservaAcumulada || 0;
     renderAll();
   });
@@ -761,9 +759,9 @@ function renderPlanejamento(){
   el.innerHTML = `
     <div class="subtabs" id="sub-planejamento">
       <button data-sub="casamento" class="${subtabPlanejamento==='casamento'?'active':''}">Casamento</button>
+      <button data-sub="contasfixas" class="${subtabPlanejamento==='contasfixas'?'active':''}">Contas fixas</button>
       <button data-sub="metas" class="${subtabPlanejamento==='metas'?'active':''}">Metas</button>
       <button data-sub="renda" class="${subtabPlanejamento==='renda'?'active':''}">Renda</button>
-      <button data-sub="recorrencias" class="${subtabPlanejamento==='recorrencias'?'active':''}">Recorrências</button>
     </div>
     <div id="sub-content"></div>
   `;
@@ -774,24 +772,25 @@ function renderPlanejamento(){
   });
   const c = document.getElementById('sub-content');
   if(subtabPlanejamento==='casamento') renderCasamento(c);
+  if(subtabPlanejamento==='contasfixas') renderContasFixas(c);
   if(subtabPlanejamento==='metas') renderMetas(c);
   if(subtabPlanejamento==='renda') renderRenda(c);
-  if(subtabPlanejamento==='recorrencias') renderRecorrencias(c);
+}
+
+function totalContasFixas(){
+  return Object.values(state.contasFixas).reduce((s,it)=>{
+    if(it.tipo==='parcela' && Number(it.mesesRestantes||0)<=0) return s;
+    return s + Number(it.valor||0);
+  },0);
 }
 
 function renderCasamento(el){
   const cas = state.casamento;
-  const grupo1 = Object.entries(cas.grupo1||{});
-  const grupo2 = Object.entries(cas.grupo2||{});
-  const totalGrupo1 = grupo1.reduce((s,[,it])=>s+Number(it.valor||0),0);
-  const totalGrupo2 = grupo2.reduce((s,[,it])=>s+Number(it.valor||0),0);
-  const totalFixo = totalGrupo1 + totalGrupo2;
+  const totalFixo = totalContasFixas();
   const rendaTotal = Object.values(state.rendas).filter(r=>r.recorrente).reduce((s,r)=>s+Number(r.valor||0),0);
   const sobra = rendaTotal - totalFixo;
   const faltaParaMeta = Math.max(0, Number(cas.metaReservaMensal||0) - sobra);
-
-  const linhasG1 = grupo1.map(([id,it])=>`<tr><td>${it.descricao}</td><td>${labelPessoa(it.responsavel)}</td><td class="num">${fmtBRL(it.valor)}</td><td class="num">${it.mesesRestantes}</td><td><button class="danger small" data-del-g1="${id}">excluir</button></td></tr>`).join('');
-  const linhasG2 = grupo2.map(([id,it])=>`<tr><td>${it.descricao}</td><td>${labelPessoa(it.responsavel)}</td><td class="num">${fmtBRL(it.valor)}</td><td><button class="danger small" data-del-g2="${id}">excluir</button></td></tr>`).join('');
+  const jaTemDados = Object.keys(state.contasFixas).length>0 || Object.keys(state.categorias).length>0;
 
   el.innerHTML = `
     <div class="panel-block">
@@ -814,34 +813,14 @@ function renderCasamento(el){
       </div>
     </div>
 
-    <div class="panel-block">
-      <h3>Grupo 1, parcelas com prazo</h3>
-      <form id="form-g1" class="row">
-        <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-        <div class="field"><label>Valor mensal</label><input type="number" step="0.01" name="valor" required></div>
-        <div class="field"><label>Meses restantes</label><input type="number" name="mesesRestantes" required></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
-      </form>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor/mês</th><th class="num">Meses</th><th></th></tr></thead>
-        <tbody>${linhasG1 || '<tr><td colspan="5" class="empty">Nada cadastrado.</td></tr>'}</tbody>
-      </table></div>
-    </div>
+    <p class="hint">O total de contas fixas acima soma tudo que está cadastrado na aba "Contas fixas", ao lado (mensalidades com prazo + despesas fixas recorrentes).</p>
 
+    ${!jaTemDados ? `
     <div class="panel-block">
-      <h3>Grupo 2, gastos recorrentes</h3>
-      <form id="form-g2" class="row">
-        <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-        <div class="field"><label>Valor mensal</label><input type="number" step="0.01" name="valor" required></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
-      </form>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor/mês</th><th></th></tr></thead>
-        <tbody>${linhasG2 || '<tr><td colspan="4" class="empty">Nada cadastrado.</td></tr>'}</tbody>
-      </table></div>
-    </div>
+      <h3>Começar com os dados da planilha</h3>
+      <p class="hint">Importa de uma vez as categorias (Alimentação, Lazer), as contas fixas e a renda que já estavam na planilha de projeção que você enviou, assim você não digita tudo de novo.</p>
+      <button id="btn-importar-planilha">Importar dados da planilha</button>
+    </div>` : ''}
   `;
 
   document.getElementById('cas-salvar').addEventListener('click', ()=>{
@@ -855,20 +834,61 @@ function renderCasamento(el){
     if(!v) return;
     update(ref(db,'casamento'), { reservaAcumulada: Number(cas.reservaAcumulada||0)+v });
   });
-  document.getElementById('form-g1').addEventListener('submit', e=>{
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    push(ref(db,'casamento/grupo1'), {descricao:fd.get('descricao'), valor:Number(fd.get('valor')), mesesRestantes:Number(fd.get('mesesRestantes')), responsavel:fd.get('responsavel')});
-    e.target.reset();
+  document.getElementById('btn-importar-planilha')?.addEventListener('click', importarDadosPlanilha);
+}
+
+function mesesRestantesAte(endMonthStr){
+  const [ey,em] = endMonthStr.split('-').map(Number);
+  const now = new Date();
+  const diff = (ey-now.getFullYear())*12 + (em-1-now.getMonth());
+  return Math.max(0, diff) + 1;
+}
+
+function importarDadosPlanilha(){
+  if(!confirm('Isso vai cadastrar as categorias, contas fixas e a renda da planilha de projeção do casamento. Continuar?')) return;
+
+  push(ref(db,'categorias'), { nome:'Alimentação', limMesCasal:1400, limMesPedro:0, limMesSofia:0, limSemCasal:0, limSemPedro:0, limSemSofia:0 });
+  push(ref(db,'categorias'), { nome:'Lazer', limMesCasal:400, limMesPedro:0, limMesSofia:0, limSemCasal:0, limSemPedro:0, limSemSofia:0 });
+
+  const parcelas = [
+    ['Vestido','sofia',1040,'2026-10'],
+    ['Roupa','sofia',140,'2026-10'],
+    ['Aliança','pedro',375,'2026-10'],
+    ['Temu','pedro',26.88,'2026-10'],
+    ['Espaço Renascença (parcela extra)','pedro',182.52,'2026-11'],
+    ['FM 26','pedro',31.53,'2026-12'],
+    ['Ballet','sofia',256,'2026-12'],
+    ['Notebook','pedro',269.39,'2027-05'],
+    ['Carro da vó (estimado, ajustar quando confirmado)','pedro',380,'2027-06'],
+    ['Celular','sofia',315,'2027-07'],
+    ['Salão casamento','pedro',1684.93,'2027-07'],
+  ];
+  parcelas.forEach(([descricao,responsavel,valor,endMonth])=>{
+    push(ref(db,'contasFixas'), {
+      descricao, valor, responsavel, tipo:'parcela',
+      mesesRestantes: mesesRestantesAte(endMonth),
+      diaVencimento:5, categoriaId:'', forma:'debito', cartaoId:'', geradoEm:{}
+    });
   });
-  document.getElementById('form-g2').addEventListener('submit', e=>{
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    push(ref(db,'casamento/grupo2'), {descricao:fd.get('descricao'), valor:Number(fd.get('valor')), responsavel:fd.get('responsavel')});
-    e.target.reset();
+
+  const recorrentes = [
+    ['Gasolina','casal',400],
+    ['Claude','casal',119.99],
+    ['iCloud','casal',33.45],
+    ['Contabo (servidor Realli)','casal',27.32],
+  ];
+  recorrentes.forEach(([descricao,responsavel,valor])=>{
+    push(ref(db,'contasFixas'), {
+      descricao, valor, responsavel, tipo:'recorrente', mesesRestantes:0,
+      diaVencimento:5, categoriaId:'', forma:'debito', cartaoId:'', geradoEm:{}
+    });
   });
-  el.querySelectorAll('[data-del-g1]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'casamento/grupo1/'+b.dataset.delG1))));
-  el.querySelectorAll('[data-del-g2]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'casamento/grupo2/'+b.dataset.delG2))));
+
+  push(ref(db,'rendas'), { descricao:'Renda combinada (Sofia + Pedro)', valor:8166.77, responsavel:'casal', recorrente:true });
+
+  update(ref(db,'casamento'), { dataCasamento:'2027-08-22', metaReservaMensal:3693.28 });
+
+  alert('Pronto. Os valores de dia de vencimento vieram todos como dia 5, um padrão, ajuste na aba Contas fixas o que for diferente.');
 }
 
 function renderMetas(el){
@@ -952,65 +972,121 @@ function renderRenda(el){
   el.querySelectorAll('[data-del-renda]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'rendas/'+b.dataset.delRenda))));
 }
 
-function renderRecorrencias(el){
+function renderContasFixas(el){
   const catOptions = Object.entries(state.categorias).map(([id,c])=>`<option value="${id}">${c.nome}</option>`).join('');
+  const cartaoOptions = Object.entries(state.cartoes).map(([id,c])=>`<option value="${id}">${c.nome} (${labelPessoa(c.titular)})</option>`).join('');
   const comp = mesAtual();
-  const linhas = Object.entries(state.recorrencias).map(([id,r])=>{
-    const gerado = !!(r.geradoEm && r.geradoEm[comp]);
-    return `<tr>
-      <td>${r.descricao}</td><td>${labelPessoa(r.responsavel)}</td><td class="num">${fmtBRL(r.valor)}</td>
-      <td class="num">${r.diaVencimento}</td>
-      <td>${gerado? '<span class="pill">gerado este mês</span>' : '<span class="pill" style="border-color:var(--gold-soft);color:var(--gold)">pendente</span>'}</td>
-      <td><button class="danger small" data-del-rec="${id}">excluir</button></td>
-    </tr>`;
-  }).join('');
+
+  const linhas = Object.entries(state.contasFixas)
+    .sort((a,b)=> (a[1].descricao||'').localeCompare(b[1].descricao||''))
+    .map(([id,r])=>{
+      const gerado = !!(r.geradoEm && r.geradoEm[comp]);
+      const finalizada = r.tipo==='parcela' && Number(r.mesesRestantes||0)<=0;
+      let statusHtml;
+      if(finalizada) statusHtml = '<span class="pill">finalizada</span>';
+      else if(gerado) statusHtml = '<span class="pill">gerado este mês</span>';
+      else statusHtml = '<span class="pill" style="border-color:var(--gold-soft);color:var(--gold)">pendente</span>';
+      return `<tr>
+        <td>${r.descricao}<div class="hint">${r.tipo==='parcela'?'Mensalidade':'Despesa fixa'} · ${labelPessoa(r.responsavel)} · ${FORMAS.find(f=>f[0]===r.forma)?.[1]||r.forma}${r.categoriaId&&state.categorias[r.categoriaId]?' · '+state.categorias[r.categoriaId].nome:''}</div></td>
+        <td><input type="number" class="num" style="width:90px" step="0.01" data-fixa="${id}" data-campo="valor" value="${r.valor}"></td>
+        <td><input type="number" class="num" style="width:55px" data-fixa="${id}" data-campo="diaVencimento" value="${r.diaVencimento}" min="1" max="31"></td>
+        <td class="num">${r.tipo==='parcela' ? `<input type="number" class="num" style="width:55px" data-fixa="${id}" data-campo="mesesRestantes" value="${r.mesesRestantes}" min="0">` : '-'}</td>
+        <td>${statusHtml}</td>
+        <td><button class="danger small" data-del-fixa="${id}">excluir</button></td>
+      </tr>`;
+    }).join('');
 
   el.innerHTML = `
     <div class="panel-block">
-      <h2>Nova conta fixa recorrente</h2>
-      <p class="hint">Como o app não tem servidor próprio rodando o tempo todo, o lançamento do mês não é gerado sozinho: você clica em "gerar lançamentos do mês" (abaixo) quando abrir o app.</p>
-      <form id="form-rec" class="row">
-        <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-        <div class="field"><label>Valor</label><input type="number" step="0.01" name="valor" required></div>
-        <div class="field"><label>Dia de vencimento</label><input type="number" name="diaVencimento" min="1" max="31" required></div>
-        <div class="field"><label>Categoria</label><select name="categoriaId">${catOptions}</select></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
+      <h2>Nova conta fixa</h2>
+      <p class="hint">Mensalidade é algo com prazo pra acabar (financiamento, parcela de produto). Despesa fixa é recorrente sem previsão de fim (assinatura, gasolina). Como o app não tem servidor rodando o tempo todo, o lançamento do mês não se gera sozinho: clique em "gerar lançamentos do mês" (abaixo) quando abrir o app.</p>
+      <form id="form-fixa">
+        <div class="row">
+          <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
+          <div class="field"><label>Valor mensal (R$)</label><input type="number" step="0.01" name="valor" required></div>
+          <div class="field"><label>Tipo</label>
+            <select name="tipo" id="fixa-tipo">
+              <option value="recorrente">Despesa fixa recorrente</option>
+              <option value="parcela">Mensalidade com prazo</option>
+            </select>
+          </div>
+          <div class="field" id="fixa-meses-field" hidden><label>Meses restantes</label><input type="number" name="mesesRestantes" min="1"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Dia de vencimento</label><input type="number" name="diaVencimento" min="1" max="31" required></div>
+          <div class="field"><label>Categoria</label><select name="categoriaId"><option value="">(sem categoria)</option>${catOptions}</select></div>
+          <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+          <div class="field"><label>Forma de pagamento</label>
+            <select name="forma" id="fixa-forma">${FORMAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+          </div>
+        </div>
+        <div class="row" id="fixa-cartao-field" hidden>
+          <div class="field"><label>Cartão</label><select name="cartaoId">${cartaoOptions}</select></div>
+        </div>
+        <button type="submit">Adicionar</button>
       </form>
     </div>
     <div class="panel-block">
       <div class="row" style="align-items:center;">
-        <h2 style="border:none;">Recorrências</h2>
+        <h2 style="border:none;">Contas fixas cadastradas</h2>
         <button id="btn-gerar-mes" class="secondary">Gerar lançamentos do mês</button>
       </div>
+      <p class="hint">Valor, dia de vencimento e meses restantes salvam ao sair do campo.</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor</th><th class="num">Vence</th><th>Status</th><th></th></tr></thead>
-        <tbody>${linhas || '<tr><td colspan="6" class="empty">Nenhuma recorrência cadastrada.</td></tr>'}</tbody>
+        <thead><tr><th>Descrição</th><th class="num">Valor</th><th class="num">Vence</th><th class="num">Meses</th><th>Status</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="6" class="empty">Nenhuma conta fixa cadastrada.</td></tr>'}</tbody>
       </table></div>
     </div>
   `;
 
-  document.getElementById('form-rec').addEventListener('submit', e=>{
+  const tipoSel = document.getElementById('fixa-tipo');
+  const formaSel = document.getElementById('fixa-forma');
+  const toggle = ()=>{
+    document.getElementById('fixa-meses-field').hidden = tipoSel.value!=='parcela';
+    document.getElementById('fixa-cartao-field').hidden = formaSel.value!=='credito';
+  };
+  tipoSel.addEventListener('change', toggle);
+  formaSel.addEventListener('change', toggle);
+
+  document.getElementById('form-fixa').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    push(ref(db,'recorrencias'), {
-      descricao:fd.get('descricao'), valor:Number(fd.get('valor')), diaVencimento:Number(fd.get('diaVencimento')),
-      categoriaId:fd.get('categoriaId'), responsavel:fd.get('responsavel'), forma:'debito', geradoEm:{}
+    push(ref(db,'contasFixas'), {
+      descricao:fd.get('descricao'), valor:Number(fd.get('valor')), tipo:fd.get('tipo'),
+      mesesRestantes: fd.get('tipo')==='parcela' ? Number(fd.get('mesesRestantes')||1) : 0,
+      diaVencimento:Number(fd.get('diaVencimento')), categoriaId:fd.get('categoriaId')||'',
+      responsavel:fd.get('responsavel'), forma:fd.get('forma'), cartaoId:fd.get('cartaoId')||'', geradoEm:{}
     });
     e.target.reset();
+    toggle();
   });
-  document.getElementById('btn-gerar-mes').addEventListener('click', ()=>{
-    Object.entries(state.recorrencias).forEach(([id,r])=>{
-      if(r.geradoEm && r.geradoEm[comp]) return;
-      const data = `${comp}-${String(r.diaVencimento).padStart(2,'0')}`;
-      push(ref(db,'lancamentos'), {
-        data, competencia:comp, descricao:r.descricao, valor:Number(r.valor),
-        categoriaId:r.categoriaId, responsavel:r.responsavel, forma:'debito', divisaoModo:'proporcional', percPedro:50, percSofia:50
-      });
-      update(ref(db,'recorrencias/'+id+'/geradoEm'), { [comp]: true });
+
+  el.querySelectorAll('input[data-fixa]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      update(ref(db,'contasFixas/'+inp.dataset.fixa), { [inp.dataset.campo]: Number(inp.value)||0 });
     });
   });
-  el.querySelectorAll('[data-del-rec]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'recorrencias/'+b.dataset.delRec))));
+
+  document.getElementById('btn-gerar-mes').addEventListener('click', ()=>{
+    Object.entries(state.contasFixas).forEach(([id,r])=>{
+      if(r.geradoEm && r.geradoEm[comp]) return;
+      if(r.tipo==='parcela' && Number(r.mesesRestantes||0)<=0) return;
+      const data = `${comp}-${String(r.diaVencimento).padStart(2,'0')}`;
+      let competencia = comp;
+      if(r.forma==='credito' && r.cartaoId && state.cartoes[r.cartaoId]){
+        competencia = gerarCompetencias(data, Number(state.cartoes[r.cartaoId].diaFechamento), 1)[0];
+      }
+      push(ref(db,'lancamentos'), {
+        data, competencia, descricao:r.descricao, valor:Number(r.valor),
+        categoriaId:r.categoriaId, responsavel:r.responsavel, forma:r.forma, cartaoId:r.cartaoId||'',
+        divisaoModo:'proporcional', percPedro:50, percSofia:50
+      });
+      const updates = { ['geradoEm/'+comp]: true };
+      if(r.tipo==='parcela') updates.mesesRestantes = Math.max(0, Number(r.mesesRestantes||0)-1);
+      update(ref(db,'contasFixas/'+id), updates);
+    });
+  });
+  el.querySelectorAll('[data-del-fixa]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'contasFixas/'+b.dataset.delFixa))));
 }
 
 /* ======================================================================
