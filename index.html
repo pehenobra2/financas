@@ -362,6 +362,20 @@ function inicioFimSemana(d){
   return [seg.toISOString().slice(0,10), dom.toISOString().slice(0,10)];
 }
 
+// Uma fonte de renda recorrente só conta num mês (AAAA-MM) se esse mês
+// estiver dentro do período dela. Sem dataInicio/dataFim = sempre ativa.
+function rendaAtivaNoMes(r, mes){
+  if(r.dataInicio && mes < r.dataInicio) return false;
+  if(r.dataFim && mes > r.dataFim) return false;
+  return true;
+}
+
+function formatMesAno(ym){
+  if(!ym) return '';
+  const [y,m] = ym.split('-');
+  return `${m}/${y}`;
+}
+
 function limiteCategoria(cat, visao, periodo){
   if(!cat) return 0;
   const chave = (periodo==='mensal' ? 'limMes' : 'limSem') + (visao==='pedro'?'Pedro':visao==='sofia'?'Sofia':'Casal');
@@ -369,7 +383,7 @@ function limiteCategoria(cat, visao, periodo){
 }
 
 function gastoCategoria(catId, visao, periodo){
-  const list = Object.values(state.lancamentos).filter(l=>l.categoriaId===catId);
+  const list = Object.values(state.lancamentos).filter(l=>l.categoriaId===catId && (l.tipo||'despesa')==='despesa');
   let total = 0;
   if(periodo==='mensal'){
     const comp = mesAtual();
@@ -424,12 +438,18 @@ function renderDashboard(){
   const comp = mesAtual();
 
   const gastosMes = Object.values(state.lancamentos)
-    .filter(l => (l.competencia||l.data.slice(0,7))===comp)
+    .filter(l => (l.tipo||'despesa')==='despesa' && (l.competencia||l.data.slice(0,7))===comp)
     .reduce((s,l)=> s+valorParaVisao(l,view), 0);
 
-  const rendaMes = Object.values(state.rendas)
-    .filter(r => view==='casal' || r.responsavel===view || r.responsavel==='casal')
-    .reduce((s,r)=> s + (r.recorrente ? Number(r.valor)||0 : 0), 0);
+  const rendaRecorrenteMes = Object.values(state.rendas)
+    .filter(r => (view==='casal' || r.responsavel===view || r.responsavel==='casal') && r.recorrente && rendaAtivaNoMes(r, comp))
+    .reduce((s,r)=> s + (Number(r.valor)||0), 0);
+
+  const receitasLancadasMes = Object.values(state.lancamentos)
+    .filter(l => l.tipo==='receita' && (l.competencia||l.data.slice(0,7))===comp)
+    .reduce((s,l)=> s+valorParaVisao(l,view), 0);
+
+  const rendaMes = rendaRecorrenteMes + receitasLancadasMes;
 
   const saldo = rendaMes - gastosMes;
 
@@ -443,7 +463,7 @@ function renderDashboard(){
   const faturasHtml = Object.entries(state.cartoes).map(([id,c])=>{
     if(view!=='casal' && c.titular!==view && c.titular!=='casal') return '';
     const totalFatura = Object.values(state.lancamentos)
-      .filter(l=>l.cartaoId===id && l.competencia===comp)
+      .filter(l=>l.cartaoId===id && l.forma==='credito' && l.competencia===comp)
       .reduce((s,l)=> s+Number(l.valor||0), 0);
     const venc = dataVencimento(comp, c.diaFechamento, c.diaVencimento);
     const dias = Math.ceil((new Date(venc) - new Date(hoje()))/86400000);
@@ -523,41 +543,57 @@ function renderLancamentos(){
   const lista = Object.entries(state.lancamentos)
     .sort((a,b)=> b[1].data.localeCompare(a[1].data))
     .slice(0,80)
-    .map(([id,l])=>`
+    .map(([id,l])=>{
+      const isReceita = l.tipo==='receita';
+      return `
       <tr>
         <td>${l.data.split('-').reverse().join('/')}</td>
         <td>${l.descricao}</td>
-        <td>${state.categorias[l.categoriaId]?.nome || '-'}</td>
+        <td>${isReceita ? '<span class="pill" style="border-color:var(--good-soft);color:var(--good)">receita</span>' : (state.categorias[l.categoriaId]?.nome || '-')}</td>
         <td>${labelPessoa(l.responsavel)}</td>
-        <td>${FORMAS.find(f=>f[0]===l.forma)?.[1]||l.forma}</td>
-        <td class="num">${fmtBRL(l.valor)}</td>
+        <td>${isReceita ? '-' : (FORMAS.find(f=>f[0]===l.forma)?.[1]||l.forma)}</td>
+        <td class="num" style="color:${isReceita?'var(--good)':'var(--bad)'}">${isReceita?'+':'-'} ${fmtBRL(l.valor)}</td>
         <td><button class="danger small" data-del-lanc="${id}">excluir</button></td>
       </tr>
-    `).join('');
+    `;}).join('');
 
   el.innerHTML = `
     <div class="panel-block">
       <h2>Novo lançamento</h2>
       <form id="form-lancamento">
         <div class="row">
+          <div class="field"><label>Tipo</label>
+            <select name="tipo" id="lanc-tipo">
+              <option value="despesa">Despesa</option>
+              <option value="receita">Receita</option>
+            </select>
+          </div>
           <div class="field"><label>Data</label><input type="date" name="data" value="${hoje()}" required></div>
           <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
           <div class="field"><label>Valor (R$)</label><input type="number" step="0.01" min="0.01" name="valor" required></div>
         </div>
         <div class="row">
-          <div class="field"><label>Categoria</label>
-            <select name="categoriaId" required>${catOptions || '<option value="">cadastre uma categoria primeiro</option>'}</select>
+          <div class="field" id="lanc-categoria-field"><label>Categoria</label>
+            <select name="categoriaId" id="lanc-categoria">${catOptions || '<option value="">cadastre uma categoria primeiro</option>'}</select>
           </div>
           <div class="field"><label>Responsável</label>
             <select name="responsavel" id="lanc-responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
           </div>
-          <div class="field"><label>Forma de pagamento</label>
+          <div class="field" id="lanc-forma-field"><label>Forma de pagamento</label>
             <select name="forma" id="lanc-forma">${FORMAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
           </div>
         </div>
-        <div class="row" id="lanc-credito-fields" hidden>
-          <div class="field"><label>Cartão</label><select name="cartaoId">${cartaoOptions}</select></div>
-          <div class="field"><label>Parcelas</label><input type="number" name="parcelas" min="1" value="1"></div>
+        <div class="row" id="lanc-cartao-field" hidden>
+          <div class="field"><label>Cartão</label><select name="cartaoId">${cartaoOptions || '<option value="">cadastre um cartão primeiro</option>'}</select></div>
+        </div>
+        <div class="row" id="lanc-parcela-row" hidden>
+          <div class="field"><label>Parcelado?</label>
+            <select id="lanc-parcelado">
+              <option value="nao">Não</option>
+              <option value="sim">Sim</option>
+            </select>
+          </div>
+          <div class="field" id="lanc-parcelas-qtd-field" hidden><label>Quantas parcelas</label><input type="number" name="parcelas" min="2" value="2"></div>
         </div>
         <div class="row" id="lanc-casal-fields" hidden>
           <div class="field"><label>Divisão</label>
@@ -584,14 +620,36 @@ function renderLancamentos(){
     </div>
   `;
 
+  const tipoSel = document.getElementById('lanc-tipo');
   const formaSel = document.getElementById('lanc-forma');
   const respSel = document.getElementById('lanc-responsavel');
+  const categoriaSel = document.getElementById('lanc-categoria');
+  const cartaoSel = document.querySelector('#lanc-cartao-field select[name=cartaoId]');
+  const parceladoSel = document.getElementById('lanc-parcelado');
+
   const toggleFields = ()=>{
-    document.getElementById('lanc-credito-fields').hidden = formaSel.value !== 'credito';
+    const isDespesa = tipoSel.value === 'despesa';
+    document.getElementById('lanc-categoria-field').hidden = !isDespesa;
+    document.getElementById('lanc-forma-field').hidden = !isDespesa;
+    categoriaSel.required = isDespesa;
+
+    const forma = formaSel.value;
+    const showCartao = isDespesa && (forma==='credito' || forma==='debito');
+    document.getElementById('lanc-cartao-field').hidden = !showCartao;
+    cartaoSel.required = isDespesa && forma==='credito';
+
+    const showParcela = isDespesa && forma==='credito';
+    document.getElementById('lanc-parcela-row').hidden = !showParcela;
+    document.getElementById('lanc-parcelas-qtd-field').hidden = !(showParcela && parceladoSel.value==='sim');
+
     document.getElementById('lanc-casal-fields').hidden = respSel.value !== 'casal';
   };
+  tipoSel.addEventListener('change', toggleFields);
   formaSel.addEventListener('change', toggleFields);
   respSel.addEventListener('change', toggleFields);
+  parceladoSel.addEventListener('change', toggleFields);
+  toggleFields();
+
   const divisaoSel = document.getElementById('lanc-divisao');
   divisaoSel?.addEventListener('change', ()=>{
     const isProp = divisaoSel.value==='proporcional';
@@ -602,36 +660,47 @@ function renderLancamentos(){
   document.getElementById('form-lancamento').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
+    const tipo = fd.get('tipo');
     const data = fd.get('data');
     const descricao = fd.get('descricao');
     const valorTotal = Number(fd.get('valor'));
-    const categoriaId = fd.get('categoriaId');
     const responsavel = fd.get('responsavel');
-    const forma = fd.get('forma');
     const divisaoModo = fd.get('divisaoModo') || 'proporcional';
     const percPedro = Number(fd.get('percPedro')||50);
     const percSofia = Number(fd.get('percSofia')||50);
 
-    if(forma==='credito'){
-      const cartaoId = fd.get('cartaoId');
-      const cartao = state.cartoes[cartaoId];
-      const parcelas = Math.max(1, Number(fd.get('parcelas')||1));
-      if(!cartao){ alert('Cadastre um cartão primeiro.'); return; }
-      const comps = gerarCompetencias(data, Number(cartao.diaFechamento), parcelas);
-      const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
-      comps.forEach((comp,idx)=>{
-        push(ref(db,'lancamentos'), {
-          data, competencia:comp,
-          descricao: descricao + (parcelas>1 ? ` (${idx+1}/${parcelas})` : ''),
-          valor: valorParcela, categoriaId, responsavel, forma, cartaoId,
-          divisaoModo, percPedro, percSofia
-        });
+    if(tipo==='receita'){
+      push(ref(db,'lancamentos'), {
+        tipo:'receita', data, competencia:data.slice(0,7), descricao, valor:valorTotal,
+        categoriaId:'', responsavel, forma:'', cartaoId:'',
+        divisaoModo, percPedro, percSofia
       });
     } else {
-      push(ref(db,'lancamentos'), {
-        data, competencia:data.slice(0,7), descricao, valor:valorTotal,
-        categoriaId, responsavel, forma, divisaoModo, percPedro, percSofia
-      });
+      const categoriaId = fd.get('categoriaId');
+      const forma = fd.get('forma');
+      const cartaoId = fd.get('cartaoId') || '';
+      const parcelado = forma==='credito' && parceladoSel.value==='sim';
+      const parcelas = parcelado ? Math.max(2, Number(fd.get('parcelas')||2)) : 1;
+
+      if(forma==='credito'){
+        const cartao = state.cartoes[cartaoId];
+        if(!cartao){ alert('Selecione um cartão de crédito cadastrado.'); return; }
+        const comps = gerarCompetencias(data, Number(cartao.diaFechamento), parcelas);
+        const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
+        comps.forEach((comp,idx)=>{
+          push(ref(db,'lancamentos'), {
+            tipo:'despesa', data, competencia:comp,
+            descricao: descricao + (parcelas>1 ? ` (${idx+1}/${parcelas})` : ''),
+            valor: valorParcela, categoriaId, responsavel, forma, cartaoId,
+            divisaoModo, percPedro, percSofia
+          });
+        });
+      } else {
+        push(ref(db,'lancamentos'), {
+          tipo:'despesa', data, competencia:data.slice(0,7), descricao, valor:valorTotal,
+          categoriaId, responsavel, forma, cartaoId, divisaoModo, percPedro, percSofia
+        });
+      }
     }
     e.target.reset();
     document.querySelector('#form-lancamento [name=data]').value = hoje();
@@ -787,7 +856,8 @@ function totalContasFixas(){
 function renderCasamento(el){
   const cas = state.casamento;
   const totalFixo = totalContasFixas();
-  const rendaTotal = Object.values(state.rendas).filter(r=>r.recorrente).reduce((s,r)=>s+Number(r.valor||0),0);
+  const mesRef = mesAtual();
+  const rendaTotal = Object.values(state.rendas).filter(r=>r.recorrente && rendaAtivaNoMes(r, mesRef)).reduce((s,r)=>s+Number(r.valor||0),0);
   const sobra = rendaTotal - totalFixo;
   const faltaParaMeta = Math.max(0, Number(cas.metaReservaMensal||0) - sobra);
   const jaTemDados = Object.keys(state.contasFixas).length>0 || Object.keys(state.categorias).length>0;
@@ -940,34 +1010,67 @@ function renderMetas(el){
 }
 
 function renderRenda(el){
-  const linhas = Object.entries(state.rendas).map(([id,r])=>`
-    <tr><td>${r.descricao}</td><td>${labelPessoa(r.responsavel)}</td><td class="num">${fmtBRL(r.valor)}</td>
-    <td>${r.recorrente?'Recorrente':'Único'}</td><td><button class="danger small" data-del-renda="${id}">excluir</button></td></tr>
-  `).join('');
+  const comp = mesAtual();
+  const linhas = Object.entries(state.rendas).map(([id,r])=>{
+    const encerrada = r.recorrente && r.dataFim && r.dataFim < comp;
+    let periodoTxt = 'sem data definida';
+    if(r.recorrente){
+      const ini = r.dataInicio ? formatMesAno(r.dataInicio) : null;
+      const fim = r.dataFim ? formatMesAno(r.dataFim) : null;
+      if(ini && fim) periodoTxt = `${ini} até ${fim}`;
+      else if(fim) periodoTxt = `até ${fim}`;
+      else if(ini) periodoTxt = `desde ${ini}`;
+    }
+    return `
+    <tr>
+      <td>${r.descricao}</td><td>${labelPessoa(r.responsavel)}</td><td class="num">${fmtBRL(r.valor)}</td>
+      <td>${r.recorrente?'Recorrente':'Único'}${r.recorrente?`<div class="hint">${periodoTxt}</div>`:''}</td>
+      <td>${encerrada ? '<span class="pill">encerrada</span>' : (r.recorrente ? '<span class="pill" style="border-color:var(--good-soft);color:var(--good)">ativa</span>' : '')}</td>
+      <td><button class="danger small" data-del-renda="${id}">excluir</button></td>
+    </tr>`;
+  }).join('');
   el.innerHTML = `
     <div class="panel-block">
       <h2>Nova fonte de renda</h2>
-      <form id="form-renda" class="row">
-        <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-        <div class="field"><label>Valor</label><input type="number" step="0.01" name="valor" required></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field"><label>Tipo</label><select name="recorrente"><option value="1">Recorrente (todo mês)</option><option value="0">Único</option></select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
+      <form id="form-renda">
+        <div class="row">
+          <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
+          <div class="field"><label>Valor</label><input type="number" step="0.01" name="valor" required></div>
+          <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+          <div class="field"><label>Tipo</label><select name="recorrente" id="renda-tipo"><option value="1">Recorrente (todo mês)</option><option value="0">Único</option></select></div>
+        </div>
+        <div class="row" id="renda-periodo-fields">
+          <div class="field"><label>A partir de (opcional)</label><input type="month" name="dataInicio"></div>
+          <div class="field"><label>Até quando (opcional)</label><input type="month" name="dataFim"></div>
+        </div>
+        <p class="hint">Deixe "Até quando" em branco se não tem previsão de parar. Quando preencher e o mês passar, a renda some sozinha da conta sem você precisar excluir.</p>
+        <button type="submit">Adicionar</button>
       </form>
     </div>
     <div class="panel-block">
       <h2>Fontes de renda</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor</th><th>Tipo</th><th></th></tr></thead>
-        <tbody>${linhas || '<tr><td colspan="5" class="empty">Nenhuma fonte cadastrada.</td></tr>'}</tbody>
+        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor</th><th>Tipo</th><th>Status</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="6" class="empty">Nenhuma fonte cadastrada.</td></tr>'}</tbody>
       </table></div>
     </div>
   `;
+
+  const rendaTipoSel = document.getElementById('renda-tipo');
+  const togglePeriodo = ()=>{ document.getElementById('renda-periodo-fields').hidden = rendaTipoSel.value!=='1'; };
+  rendaTipoSel.addEventListener('change', togglePeriodo);
+  togglePeriodo();
+
   document.getElementById('form-renda').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    push(ref(db,'rendas'), {descricao:fd.get('descricao'), valor:Number(fd.get('valor')), responsavel:fd.get('responsavel'), recorrente: fd.get('recorrente')==='1'});
+    push(ref(db,'rendas'), {
+      descricao:fd.get('descricao'), valor:Number(fd.get('valor')), responsavel:fd.get('responsavel'),
+      recorrente: fd.get('recorrente')==='1',
+      dataInicio: fd.get('dataInicio')||'', dataFim: fd.get('dataFim')||''
+    });
     e.target.reset();
+    togglePeriodo();
   });
   el.querySelectorAll('[data-del-renda]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'rendas/'+b.dataset.delRenda))));
 }
@@ -1092,6 +1195,36 @@ function renderContasFixas(el){
 /* ======================================================================
    12) RELATÓRIOS
 ====================================================================== */
+// Projeta renda recorrente ativa menos contas fixas (mensalidades decrescendo
+// mês a mês, despesas recorrentes continuando) para os próximos N meses.
+function projetarFluxo(nMeses){
+  const resultado = [];
+  const hojeD = new Date();
+  let acumulado = 0;
+  for(let i=0;i<nMeses;i++){
+    const d = new Date(hojeD.getFullYear(), hojeD.getMonth()+i, 1);
+    const mes = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+
+    const renda = Object.values(state.rendas).reduce((s,r)=>{
+      if(!r.recorrente || !rendaAtivaNoMes(r, mes)) return s;
+      return s + Number(r.valor||0);
+    },0);
+
+    const fixas = Object.values(state.contasFixas).reduce((s,it)=>{
+      if(it.tipo==='parcela'){
+        const restante = Number(it.mesesRestantes||0) - i;
+        if(restante<=0) return s;
+      }
+      return s + Number(it.valor||0);
+    },0);
+
+    const saldo = renda - fixas;
+    acumulado += saldo;
+    resultado.push({mes, renda, fixas, saldo, acumulado});
+  }
+  return resultado;
+}
+
 function renderRelatorios(){
   const el = document.getElementById('tab-relatorios');
   const comp = mesAtual();
@@ -1129,9 +1262,47 @@ function renderRelatorios(){
       <div class="field" style="max-width:260px;"><select id="rel-cat">${opts}</select></div>
       <div id="rel-tendencia" style="margin-top:1em;"></div>
     </div>
+
+    <div class="panel-block">
+      <div class="row" style="align-items:center;">
+        <h2 style="border:none;">Previsão de fluxo de caixa</h2>
+        <div class="field" style="max-width:160px; margin:0;">
+          <select id="rel-horizonte">
+            <option value="6">6 meses</option>
+            <option value="12" selected>12 meses</option>
+            <option value="24">24 meses</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint">Projeta a renda recorrente cadastrada (aba Renda) contra as contas fixas cadastradas (aba Contas fixas), mês a mês, considerando quando cada renda começa/termina e quando cada mensalidade acaba. Não inclui lançamentos avulsos nem gastos variáveis do dia a dia (alimentação, lazer etc.), só o que está fixado nessas duas abas.</p>
+      <div id="rel-previsao"></div>
+    </div>
   `;
 
   document.getElementById('btn-export-csv').addEventListener('click', exportarCSV);
+
+  const horizSel = document.getElementById('rel-horizonte');
+  const desenhaPrevisao = ()=>{
+    const n = Number(horizSel.value);
+    const linhas = projetarFluxo(n);
+    const rows = linhas.map(l=>`
+      <tr>
+        <td>${formatMesAno(l.mes)}</td>
+        <td class="num">${fmtBRL(l.renda)}</td>
+        <td class="num">${fmtBRL(l.fixas)}</td>
+        <td class="num" style="color:${l.saldo<0?'var(--bad)':'var(--good)'}">${fmtBRL(l.saldo)}</td>
+        <td class="num" style="color:${l.acumulado<0?'var(--bad)':'var(--ink)'}">${fmtBRL(l.acumulado)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('rel-previsao').innerHTML = `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Mês</th><th class="num">Renda prevista</th><th class="num">Contas fixas</th><th class="num">Saldo do mês</th><th class="num">Acumulado</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    `;
+  };
+  horizSel.addEventListener('change', desenhaPrevisao);
+  desenhaPrevisao();
 
   const catSel = document.getElementById('rel-cat');
   if(catIds.length){
@@ -1165,9 +1336,9 @@ function renderRelatorios(){
 }
 
 function exportarCSV(){
-  const linhas = [['data','descricao','categoria','responsavel','forma','valor']];
+  const linhas = [['data','tipo','descricao','categoria','responsavel','forma','valor']];
   Object.values(state.lancamentos).sort((a,b)=>a.data.localeCompare(b.data)).forEach(l=>{
-    linhas.push([l.data, l.descricao, state.categorias[l.categoriaId]?.nome||'', l.responsavel, l.forma, String(l.valor).replace('.',',')]);
+    linhas.push([l.data, (l.tipo||'despesa'), l.descricao, state.categorias[l.categoriaId]?.nome||'', l.responsavel, l.forma||'', String(l.valor).replace('.',',')]);
   });
   const csv = linhas.map(l=> l.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(';')).join('\n');
   const blob = new Blob(["\uFEFF"+csv], {type:'text/csv;charset=utf-8;'});
