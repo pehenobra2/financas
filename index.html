@@ -591,10 +591,9 @@ function dataVencimento(competencia, diaFechamento, diaVencimento){
 /* ======================================================================
    8) LANÇAMENTOS
 ====================================================================== */
+let editandoLancamento = null;
 function renderLancamentos(){
   const el = document.getElementById('tab-lancamentos');
-  const catOptions = Object.entries(state.categorias).map(([id,c])=>`<option value="${id}">${c.nome}</option>`).join('');
-  const cartaoOptions = Object.entries(state.cartoes).map(([id,c])=>`<option value="${id}">${c.nome} (${labelPessoa(c.titular)})</option>`).join('');
 
   const lista = Object.entries(state.lancamentos)
     .sort((a,b)=> b[1].data.localeCompare(a[1].data))
@@ -609,40 +608,42 @@ function renderLancamentos(){
         <td>${labelPessoa(l.responsavel)}</td>
         <td>${isReceita ? '-' : (FORMAS.find(f=>f[0]===l.forma)?.[1]||l.forma)}</td>
         <td class="num" style="color:${isReceita?'var(--good)':'var(--bad)'}">${isReceita?'+':'-'} ${fmtBRL(l.valor)}</td>
-        <td><button class="danger small" data-del-lanc="${id}">excluir</button></td>
+        <td><button class="secondary small" data-edit-lanc="${id}">editar</button> <button class="danger small" data-del-lanc="${id}">excluir</button></td>
       </tr>
     `;}).join('');
 
+  const editL = editandoLancamento ? state.lancamentos[editandoLancamento] : null;
+
   el.innerHTML = `
     <div class="panel-block">
-      <h2>Novo lançamento</h2>
+      <h2>${editL ? 'Editar lançamento' : 'Novo lançamento'}</h2>
       <form id="form-lancamento">
         <div class="row">
           <div class="field"><label>Tipo</label>
             <select name="tipo" id="lanc-tipo">
-              <option value="despesa">Despesa</option>
-              <option value="receita">Receita</option>
+              <option value="despesa" ${!editL || editL.tipo!=='receita' ? 'selected':''}>Despesa</option>
+              <option value="receita" ${editL && editL.tipo==='receita' ? 'selected':''}>Receita</option>
             </select>
           </div>
-          <div class="field"><label>Data</label><input type="date" name="data" value="${hoje()}" required></div>
-          <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-          <div class="field"><label>Valor (R$)</label><input type="number" step="0.01" min="0.01" name="valor" required></div>
+          <div class="field"><label>Data</label><input type="date" name="data" value="${editL ? editL.data : hoje()}" required></div>
+          <div class="field"><label>Descrição</label><input type="text" name="descricao" value="${editL ? editL.descricao.replace(/"/g,'&quot;') : ''}" required></div>
+          <div class="field"><label>Valor (R$)</label><input type="number" step="0.01" min="0.01" name="valor" value="${editL ? editL.valor : ''}" required></div>
         </div>
         <div class="row">
           <div class="field" id="lanc-categoria-field"><label>Categoria</label>
-            <select name="categoriaId" id="lanc-categoria">${catOptions || '<option value="">cadastre uma categoria primeiro</option>'}</select>
+            <select name="categoriaId" id="lanc-categoria">${Object.entries(state.categorias).map(([id,c])=>`<option value="${id}" ${editL&&editL.categoriaId===id?'selected':''}>${c.nome}</option>`).join('') || '<option value="">cadastre uma categoria primeiro</option>'}</select>
           </div>
           <div class="field"><label>Responsável</label>
-            <select name="responsavel" id="lanc-responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+            <select name="responsavel" id="lanc-responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}" ${editL&&editL.responsavel===v?'selected':''}>${l}</option>`).join('')}</select>
           </div>
           <div class="field" id="lanc-forma-field"><label>Forma de pagamento</label>
-            <select name="forma" id="lanc-forma">${FORMAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+            <select name="forma" id="lanc-forma">${FORMAS.map(([v,l])=>`<option value="${v}" ${editL&&editL.forma===v?'selected':''}>${l}</option>`).join('')}</select>
           </div>
         </div>
         <div class="row" id="lanc-cartao-field" hidden>
-          <div class="field"><label>Cartão</label><select name="cartaoId">${cartaoOptions || '<option value="">cadastre um cartão primeiro</option>'}</select></div>
+          <div class="field"><label>Cartão</label><select name="cartaoId">${Object.entries(state.cartoes).map(([id,c])=>`<option value="${id}" ${editL&&editL.cartaoId===id?'selected':''}>${c.nome} (${labelPessoa(c.titular)})</option>`).join('') || '<option value="">cadastre um cartão primeiro</option>'}</select></div>
         </div>
-        <div class="row" id="lanc-parcela-row" hidden>
+        <div class="row" id="lanc-parcela-row" ${editL?'hidden':''}>
           <div class="field"><label>Parcelado?</label>
             <select id="lanc-parcelado">
               <option value="nao">Não</option>
@@ -657,17 +658,19 @@ function renderLancamentos(){
             </select>
           </div>
         </div>
+        ${editL ? `<p class="hint">Esse lançamento faz parte de uma série parcelada? Edite aqui só os dados dele (valor, descrição, categoria etc). Pra mudar a quantidade de parcelas, exclua a série inteira e lance de novo.</p>` : ''}
         <div class="row" id="lanc-casal-fields" hidden>
           <div class="field"><label>Divisão</label>
             <select name="divisaoModo" id="lanc-divisao">
-              <option value="proporcional">Proporcional</option>
-              <option value="integral">Integral (100% pra cada um)</option>
+              <option value="proporcional" ${!editL||editL.divisaoModo!=='integral'?'selected':''}>Proporcional</option>
+              <option value="integral" ${editL&&editL.divisaoModo==='integral'?'selected':''}>Integral (100% pra cada um)</option>
             </select>
           </div>
-          <div class="field" id="lanc-perc-pedro"><label>% Pedro</label><input type="number" name="percPedro" value="50" min="0" max="100"></div>
-          <div class="field" id="lanc-perc-sofia"><label>% Sofia</label><input type="number" name="percSofia" value="50" min="0" max="100"></div>
+          <div class="field" id="lanc-perc-pedro"><label>% Pedro</label><input type="number" name="percPedro" value="${editL?editL.percPedro??50:50}" min="0" max="100"></div>
+          <div class="field" id="lanc-perc-sofia"><label>% Sofia</label><input type="number" name="percSofia" value="${editL?editL.percSofia??50:50}" min="0" max="100"></div>
         </div>
-        <button type="submit">Adicionar</button>
+        <button type="submit">${editL ? 'Salvar alterações' : 'Adicionar'}</button>
+        ${editL ? `<button type="button" class="secondary" id="btn-cancelar-edicao-lanc">Cancelar edição</button>` : ''}
       </form>
     </div>
 
@@ -700,7 +703,7 @@ function renderLancamentos(){
     document.getElementById('lanc-cartao-field').hidden = !showCartao;
     cartaoSel.required = isDespesa && forma==='credito';
 
-    const showParcela = isDespesa && forma==='credito';
+    const showParcela = isDespesa && forma==='credito' && !editandoLancamento;
     document.getElementById('lanc-parcela-row').hidden = !showParcela;
     const showParcelasDetalhe = showParcela && parceladoSel.value==='sim';
     document.getElementById('lanc-parcelas-qtd-field').hidden = !showParcelasDetalhe;
@@ -715,11 +718,13 @@ function renderLancamentos(){
   toggleFields();
 
   const divisaoSel = document.getElementById('lanc-divisao');
-  divisaoSel?.addEventListener('change', ()=>{
+  const toggleDivisaoOpacidade = ()=>{
     const isProp = divisaoSel.value==='proporcional';
     document.getElementById('lanc-perc-pedro').style.opacity = isProp?1:.4;
     document.getElementById('lanc-perc-sofia').style.opacity = isProp?1:.4;
-  });
+  };
+  divisaoSel?.addEventListener('change', toggleDivisaoOpacidade);
+  toggleDivisaoOpacidade();
 
   document.getElementById('form-lancamento').addEventListener('submit', e=>{
     e.preventDefault();
@@ -732,6 +737,33 @@ function renderLancamentos(){
     const divisaoModo = fd.get('divisaoModo') || 'proporcional';
     const percPedro = Number(fd.get('percPedro')||50);
     const percSofia = Number(fd.get('percSofia')||50);
+
+    if(editandoLancamento){
+      const id = editandoLancamento;
+      if(tipo==='receita'){
+        update(ref(db,'lancamentos/'+id), {
+          tipo:'receita', data, competencia:data.slice(0,7), descricao, valor:valorTotal,
+          categoriaId:'', responsavel, forma:'', cartaoId:'', divisaoModo, percPedro, percSofia
+        });
+      } else {
+        const categoriaId = fd.get('categoriaId');
+        const forma = fd.get('forma');
+        const cartaoId = fd.get('cartaoId') || '';
+        let competencia = data.slice(0,7);
+        if(forma==='credito'){
+          const cartao = state.cartoes[cartaoId];
+          if(!cartao){ alert('Selecione um cartão de crédito cadastrado.'); return; }
+          competencia = gerarCompetencias(data, Number(cartao.diaFechamento), 1)[0];
+        }
+        update(ref(db,'lancamentos/'+id), {
+          tipo:'despesa', data, competencia, descricao, valor:valorTotal,
+          categoriaId, responsavel, forma, cartaoId, divisaoModo, percPedro, percSofia
+        });
+      }
+      editandoLancamento = null;
+      renderLancamentos();
+      return;
+    }
 
     if(tipo==='receita'){
       push(ref(db,'lancamentos'), {
@@ -777,36 +809,54 @@ function renderLancamentos(){
   });
 
   el.querySelectorAll('[data-del-lanc]').forEach(b=>{
-    b.addEventListener('click', ()=> remove(ref(db,'lancamentos/'+b.dataset.delLanc)));
+    b.addEventListener('click', ()=>{
+      if(editandoLancamento===b.dataset.delLanc) editandoLancamento = null;
+      remove(ref(db,'lancamentos/'+b.dataset.delLanc));
+    });
+  });
+  el.querySelectorAll('[data-edit-lanc]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      editandoLancamento = b.dataset.editLanc;
+      renderLancamentos();
+      document.getElementById('form-lancamento').scrollIntoView({behavior:'smooth', block:'start'});
+    });
+  });
+  document.getElementById('btn-cancelar-edicao-lanc')?.addEventListener('click', ()=>{
+    editandoLancamento = null;
+    renderLancamentos();
   });
 }
 
 /* ======================================================================
    9) CARTÕES
 ====================================================================== */
+let editandoCartao = null;
 function renderCartoes(){
   const el = document.getElementById('tab-cartoes');
   const lista = Object.entries(state.cartoes).map(([id,c])=>`
     <tr>
       <td>${c.nome}</td><td>${labelPessoa(c.titular)}</td>
       <td class="num">${c.diaFechamento}</td><td class="num">${c.diaVencimento}</td>
-      <td><button class="danger small" data-del-cartao="${id}">excluir</button></td>
+      <td><button class="secondary small" data-edit-cartao="${id}">editar</button> <button class="danger small" data-del-cartao="${id}">excluir</button></td>
     </tr>
   `).join('');
 
+  const editC = editandoCartao ? state.cartoes[editandoCartao] : null;
+
   el.innerHTML = `
     <div class="panel-block">
-      <h2>Novo cartão</h2>
+      <h2>${editC ? 'Editar cartão' : 'Novo cartão'}</h2>
       <form id="form-cartao">
         <div class="row">
-          <div class="field"><label>Nome do cartão</label><input type="text" name="nome" required></div>
+          <div class="field"><label>Nome do cartão</label><input type="text" name="nome" value="${editC?editC.nome.replace(/"/g,'&quot;'):''}" required></div>
           <div class="field"><label>Titular</label>
-            <select name="titular">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+            <select name="titular">${PESSOAS.map(([v,l])=>`<option value="${v}" ${editC&&editC.titular===v?'selected':''}>${l}</option>`).join('')}</select>
           </div>
-          <div class="field"><label>Dia de fechamento</label><input type="number" name="diaFechamento" min="1" max="31" required></div>
-          <div class="field"><label>Dia de vencimento</label><input type="number" name="diaVencimento" min="1" max="31" required></div>
+          <div class="field"><label>Dia de fechamento</label><input type="number" name="diaFechamento" min="1" max="31" value="${editC?editC.diaFechamento:''}" required></div>
+          <div class="field"><label>Dia de vencimento</label><input type="number" name="diaVencimento" min="1" max="31" value="${editC?editC.diaVencimento:''}" required></div>
         </div>
-        <button type="submit">Adicionar</button>
+        <button type="submit">${editC?'Salvar alterações':'Adicionar'}</button>
+        ${editC ? `<button type="button" class="secondary" id="btn-cancelar-edicao-cartao">Cancelar edição</button>` : ''}
       </form>
     </div>
     <div class="panel-block">
@@ -823,14 +873,34 @@ function renderCartoes(){
   document.getElementById('form-cartao').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    push(ref(db,'cartoes'), {
+    const dados = {
       nome: fd.get('nome'), titular: fd.get('titular'),
       diaFechamento: Number(fd.get('diaFechamento')), diaVencimento: Number(fd.get('diaVencimento'))
-    });
+    };
+    if(editandoCartao){
+      update(ref(db,'cartoes/'+editandoCartao), dados);
+      editandoCartao = null;
+    } else {
+      push(ref(db,'cartoes'), dados);
+    }
     e.target.reset();
+    renderCartoes();
   });
   el.querySelectorAll('[data-del-cartao]').forEach(b=>{
-    b.addEventListener('click', ()=> remove(ref(db,'cartoes/'+b.dataset.delCartao)));
+    b.addEventListener('click', ()=>{
+      if(editandoCartao===b.dataset.delCartao) editandoCartao = null;
+      remove(ref(db,'cartoes/'+b.dataset.delCartao));
+    });
+  });
+  el.querySelectorAll('[data-edit-cartao]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      editandoCartao = b.dataset.editCartao;
+      renderCartoes();
+    });
+  });
+  document.getElementById('btn-cancelar-edicao-cartao')?.addEventListener('click', ()=>{
+    editandoCartao = null;
+    renderCartoes();
   });
 }
 
@@ -841,7 +911,7 @@ function renderCategorias(){
   const el = document.getElementById('tab-categorias');
   const linhas = Object.entries(state.categorias).map(([id,c])=>`
     <tr>
-      <td>${c.nome}</td>
+      <td><input type="text" style="width:130px" data-cat="${id}" data-campo="nome" value="${(c.nome||'').replace(/"/g,'&quot;')}"></td>
       <td><input type="number" class="num" style="width:85px" data-cat="${id}" data-campo="limMesCasal" value="${c.limMesCasal||0}"></td>
       <td><input type="number" class="num" style="width:85px" data-cat="${id}" data-campo="limMesPedro" value="${c.limMesPedro||0}"></td>
       <td><input type="number" class="num" style="width:85px" data-cat="${id}" data-campo="limMesSofia" value="${c.limMesSofia||0}"></td>
@@ -862,7 +932,7 @@ function renderCategorias(){
     </div>
     <div class="panel-block">
       <h2>Categorias e limites</h2>
-      <p class="hint">Limites em R$. Deixe 0 para não definir limite naquele nível. Os valores salvam ao sair do campo.</p>
+      <p class="hint">Nome e limites em R$. Deixe 0 para não definir limite naquele nível. Tudo salva ao sair do campo.</p>
       <div class="table-wrap">
       <table>
         <thead><tr><th>Categoria</th><th class="num">Mês Casal</th><th class="num">Mês Pedro</th><th class="num">Mês Sofia</th><th class="num">Sem. Casal</th><th class="num">Sem. Pedro</th><th class="num">Sem. Sofia</th><th></th></tr></thead>
@@ -880,7 +950,8 @@ function renderCategorias(){
   });
   el.querySelectorAll('input[data-cat]').forEach(inp=>{
     inp.addEventListener('change', ()=>{
-      update(ref(db,'categorias/'+inp.dataset.cat), { [inp.dataset.campo]: Number(inp.value)||0 });
+      const valor = inp.dataset.campo==='nome' ? (inp.value.trim()||'(sem nome)') : (Number(inp.value)||0);
+      update(ref(db,'categorias/'+inp.dataset.cat), { [inp.dataset.campo]: valor });
     });
   });
   el.querySelectorAll('[data-del-cat]').forEach(b=>{
@@ -1070,6 +1141,7 @@ function importarDadosPlanilha(){
   alert('Pronto. As mensalidades já entraram como lançamentos (aba Lançamentos) e as despesas recorrentes entraram em Contas fixas. O dia de vencimento veio como dia 5, um padrão, ajuste o que for diferente.');
 }
 
+let editandoMeta = null;
 function renderMetas(el){
   const linhas = Object.entries(state.metas).map(([id,m])=>{
     const perc = m.valorAlvo>0 ? Math.min(100,(m.valorAtual/m.valorAlvo)*100) : 0;
@@ -1077,18 +1149,21 @@ function renderMetas(el){
       <td>${m.nome}${m.tipo==='casamento'?' <span class="pill">casamento</span>':''}</td>
       <td>${labelPessoa(m.responsavel)}</td>
       <td class="num">${fmtBRL(m.valorAtual)} / ${fmtBRL(m.valorAlvo)}<div class="progress"><div style="width:${perc}%"></div></div></td>
-      <td><button class="secondary small" data-aporte="${id}">+ aporte</button> <button class="danger small" data-del-meta="${id}">excluir</button></td>
+      <td><button class="secondary small" data-aporte="${id}">+ aporte</button> <button class="secondary small" data-edit-meta="${id}">editar</button> <button class="danger small" data-del-meta="${id}">excluir</button></td>
     </tr>`;
   }).join('');
 
+  const editM = editandoMeta ? state.metas[editandoMeta] : null;
+
   el.innerHTML = `
     <div class="panel-block">
-      <h2>Nova meta</h2>
+      <h2>${editM ? 'Editar meta' : 'Nova meta'}</h2>
       <form id="form-meta" class="row">
-        <div class="field"><label>Nome</label><input type="text" name="nome" required placeholder="ex.: Lua de mel"></div>
-        <div class="field"><label>Valor alvo</label><input type="number" step="0.01" name="valorAlvo" required></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
+        <div class="field"><label>Nome</label><input type="text" name="nome" value="${editM?editM.nome.replace(/"/g,'&quot;'):''}" required placeholder="ex.: Lua de mel"></div>
+        <div class="field"><label>Valor alvo</label><input type="number" step="0.01" name="valorAlvo" value="${editM?editM.valorAlvo:''}" required></div>
+        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}" ${editM&&editM.responsavel===v?'selected':''}>${l}</option>`).join('')}</select></div>
+        <div class="field" style="align-self:flex-end"><button type="submit">${editM?'Salvar alterações':'Adicionar'}</button></div>
+        ${editM ? `<div class="field" style="align-self:flex-end"><button type="button" class="secondary" id="btn-cancelar-edicao-meta">Cancelar</button></div>` : ''}
       </form>
       <p class="hint">Para reserva de emergência, cadastre como uma meta sem data alvo.</p>
     </div>
@@ -1104,8 +1179,14 @@ function renderMetas(el){
   document.getElementById('form-meta').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    push(ref(db,'metas'), {nome:fd.get('nome'), valorAlvo:Number(fd.get('valorAlvo')), valorAtual:0, responsavel:fd.get('responsavel'), tipo:'geral'});
+    if(editandoMeta){
+      update(ref(db,'metas/'+editandoMeta), { nome:fd.get('nome'), valorAlvo:Number(fd.get('valorAlvo')), responsavel:fd.get('responsavel') });
+      editandoMeta = null;
+    } else {
+      push(ref(db,'metas'), {nome:fd.get('nome'), valorAlvo:Number(fd.get('valorAlvo')), valorAtual:0, responsavel:fd.get('responsavel'), tipo:'geral'});
+    }
     e.target.reset();
+    renderMetas(el);
   });
   el.querySelectorAll('[data-aporte]').forEach(b=>{
     b.addEventListener('click', ()=>{
@@ -1115,9 +1196,17 @@ function renderMetas(el){
       update(ref(db,'metas/'+b.dataset.aporte), { valorAtual: Number(meta.valorAtual||0)+v });
     });
   });
-  el.querySelectorAll('[data-del-meta]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'metas/'+b.dataset.delMeta))));
+  el.querySelectorAll('[data-edit-meta]').forEach(b=>{
+    b.addEventListener('click', ()=>{ editandoMeta = b.dataset.editMeta; renderMetas(el); });
+  });
+  document.getElementById('btn-cancelar-edicao-meta')?.addEventListener('click', ()=>{ editandoMeta = null; renderMetas(el); });
+  el.querySelectorAll('[data-del-meta]').forEach(b=> b.addEventListener('click', ()=>{
+    if(editandoMeta===b.dataset.delMeta) editandoMeta = null;
+    remove(ref(db,'metas/'+b.dataset.delMeta));
+  }));
 }
 
+let editandoRenda = null;
 function renderRenda(el){
   const comp = mesAtual();
   const linhas = Object.entries(state.rendas).map(([id,r])=>{
@@ -1135,25 +1224,32 @@ function renderRenda(el){
       <td>${r.descricao}</td><td>${labelPessoa(r.responsavel)}</td><td class="num">${fmtBRL(r.valor)}</td>
       <td>${r.recorrente?'Recorrente':'Único'}${r.recorrente?`<div class="hint">${periodoTxt}</div>`:''}</td>
       <td>${encerrada ? '<span class="pill">encerrada</span>' : (r.recorrente ? '<span class="pill" style="border-color:var(--good-soft);color:var(--good)">ativa</span>' : '')}</td>
-      <td><button class="danger small" data-del-renda="${id}">excluir</button></td>
+      <td><button class="secondary small" data-edit-renda="${id}">editar</button> <button class="danger small" data-del-renda="${id}">excluir</button></td>
     </tr>`;
   }).join('');
+
+  const editR = editandoRenda ? state.rendas[editandoRenda] : null;
+
   el.innerHTML = `
     <div class="panel-block">
-      <h2>Nova fonte de renda</h2>
+      <h2>${editR ? 'Editar fonte de renda' : 'Nova fonte de renda'}</h2>
       <form id="form-renda">
         <div class="row">
-          <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-          <div class="field"><label>Valor</label><input type="number" step="0.01" name="valor" required></div>
-          <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-          <div class="field"><label>Tipo</label><select name="recorrente" id="renda-tipo"><option value="1">Recorrente (todo mês)</option><option value="0">Único</option></select></div>
+          <div class="field"><label>Descrição</label><input type="text" name="descricao" value="${editR?editR.descricao.replace(/"/g,'&quot;'):''}" required></div>
+          <div class="field"><label>Valor</label><input type="number" step="0.01" name="valor" value="${editR?editR.valor:''}" required></div>
+          <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}" ${editR&&editR.responsavel===v?'selected':''}>${l}</option>`).join('')}</select></div>
+          <div class="field"><label>Tipo</label><select name="recorrente" id="renda-tipo">
+            <option value="1" ${!editR||editR.recorrente?'selected':''}>Recorrente (todo mês)</option>
+            <option value="0" ${editR&&!editR.recorrente?'selected':''}>Único</option>
+          </select></div>
         </div>
         <div class="row" id="renda-periodo-fields">
-          <div class="field"><label>A partir de (opcional)</label><input type="month" name="dataInicio"></div>
-          <div class="field"><label>Até quando (opcional)</label><input type="month" name="dataFim"></div>
+          <div class="field"><label>A partir de (opcional)</label><input type="month" name="dataInicio" value="${editR?editR.dataInicio||'':''}"></div>
+          <div class="field"><label>Até quando (opcional)</label><input type="month" name="dataFim" value="${editR?editR.dataFim||'':''}"></div>
         </div>
         <p class="hint">Deixe "Até quando" em branco se não tem previsão de parar. Quando preencher e o mês passar, a renda some sozinha da conta sem você precisar excluir.</p>
-        <button type="submit">Adicionar</button>
+        <button type="submit">${editR?'Salvar alterações':'Adicionar'}</button>
+        ${editR ? `<button type="button" class="secondary" id="btn-cancelar-edicao-renda">Cancelar edição</button>` : ''}
       </form>
     </div>
     <div class="panel-block">
@@ -1173,20 +1269,33 @@ function renderRenda(el){
   document.getElementById('form-renda').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    push(ref(db,'rendas'), {
+    const dados = {
       descricao:fd.get('descricao'), valor:Number(fd.get('valor')), responsavel:fd.get('responsavel'),
       recorrente: fd.get('recorrente')==='1',
       dataInicio: fd.get('dataInicio')||'', dataFim: fd.get('dataFim')||''
-    });
+    };
+    if(editandoRenda){
+      update(ref(db,'rendas/'+editandoRenda), dados);
+      editandoRenda = null;
+    } else {
+      push(ref(db,'rendas'), dados);
+    }
     e.target.reset();
-    togglePeriodo();
+    renderRenda(el);
   });
-  el.querySelectorAll('[data-del-renda]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'rendas/'+b.dataset.delRenda))));
+  el.querySelectorAll('[data-edit-renda]').forEach(b=>{
+    b.addEventListener('click', ()=>{ editandoRenda = b.dataset.editRenda; renderRenda(el); });
+  });
+  document.getElementById('btn-cancelar-edicao-renda')?.addEventListener('click', ()=>{ editandoRenda = null; renderRenda(el); });
+  el.querySelectorAll('[data-del-renda]').forEach(b=> b.addEventListener('click', ()=>{
+    if(editandoRenda===b.dataset.delRenda) editandoRenda = null;
+    remove(ref(db,'rendas/'+b.dataset.delRenda));
+  }));
 }
 
+let editandoFixa = null;
 function renderContasFixas(el){
   const catOptions = Object.entries(state.categorias).map(([id,c])=>`<option value="${id}">${c.nome}</option>`).join('');
-  const cartaoOptions = Object.entries(state.cartoes).map(([id,c])=>`<option value="${id}">${c.nome} (${labelPessoa(c.titular)})</option>`).join('');
   const comp = mesAtual();
 
   const linhas = Object.entries(state.contasFixas)
@@ -1205,34 +1314,37 @@ function renderContasFixas(el){
         <td><input type="number" class="num" style="width:55px" data-fixa="${id}" data-campo="diaVencimento" value="${r.diaVencimento}" min="1" max="31"></td>
         <td class="num">${ehMensalidadeAntiga ? `<input type="number" class="num" style="width:55px" data-fixa="${id}" data-campo="mesesRestantes" value="${r.mesesRestantes}" min="0">` : '-'}</td>
         <td>${statusHtml}</td>
-        <td>${ehMensalidadeAntiga && !finalizada ? `<button class="secondary small" data-converter-fixa="${id}">converter em lançamentos</button> ` : ''}<button class="danger small" data-del-fixa="${id}">excluir</button></td>
+        <td>${ehMensalidadeAntiga && !finalizada ? `<button class="secondary small" data-converter-fixa="${id}">converter em lançamentos</button> ` : ''}<button class="secondary small" data-edit-fixa="${id}">editar</button> <button class="danger small" data-del-fixa="${id}">excluir</button></td>
       </tr>`;
     }).join('');
 
   const temMensalidadeAntiga = Object.values(state.contasFixas).some(r=>r.tipo==='parcela' && Number(r.mesesRestantes||0)>0);
+  const editF = editandoFixa ? state.contasFixas[editandoFixa] : null;
 
   el.innerHTML = `
     <div class="panel-block">
-      <h2>Nova conta fixa</h2>
+      <h2>${editF ? 'Editar conta fixa' : 'Nova conta fixa'}</h2>
       <p class="hint">Contas fixas aqui são despesas recorrentes sem previsão de término (assinatura, gasolina). Como o app não roda um servidor o tempo todo, o lançamento do mês não se gera sozinho: clique em "gerar lançamentos do mês" (abaixo) quando abrir o app.</p>
       <p class="hint">Mensalidade ou financiamento com prazo pra acabar (ex.: parcela de um produto, consórcio)? Cadastre direto na aba <strong>Lançamentos</strong>, como despesa, forma crédito, marcando "Parcelado = Sim" e informando quantas parcelas ainda faltam. Todas as parcelas futuras já são geradas de uma vez, sem precisar voltar aqui todo mês.</p>
       <form id="form-fixa">
         <div class="row">
-          <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-          <div class="field"><label>Valor mensal (R$)</label><input type="number" step="0.01" name="valor" required></div>
-          <div class="field"><label>Dia de vencimento</label><input type="number" name="diaVencimento" min="1" max="31" required></div>
+          <div class="field"><label>Descrição</label><input type="text" name="descricao" value="${editF?editF.descricao.replace(/"/g,'&quot;'):''}" required></div>
+          <div class="field"><label>Valor mensal (R$)</label><input type="number" step="0.01" name="valor" value="${editF?editF.valor:''}" required></div>
+          <div class="field"><label>Dia do mês (aproximado)</label><input type="number" name="diaVencimento" min="1" max="31" value="${editF?editF.diaVencimento:5}"></div>
         </div>
+        <p class="hint">Não precisa ser exato, é só pra organizar em qual fatura do cartão a despesa cai (quando for no crédito) e em que dia do mês ela normalmente acontece. Se não souber, deixe o padrão e ajuste depois na lista abaixo.</p>
         <div class="row">
-          <div class="field"><label>Categoria</label><select name="categoriaId"><option value="">(sem categoria)</option>${catOptions}</select></div>
-          <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+          <div class="field"><label>Categoria</label><select name="categoriaId"><option value="">(sem categoria)</option>${Object.entries(state.categorias).map(([id,c])=>`<option value="${id}" ${editF&&editF.categoriaId===id?'selected':''}>${c.nome}</option>`).join('')}</select></div>
+          <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}" ${editF&&editF.responsavel===v?'selected':''}>${l}</option>`).join('')}</select></div>
           <div class="field"><label>Forma de pagamento</label>
-            <select name="forma" id="fixa-forma">${FORMAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+            <select name="forma" id="fixa-forma">${FORMAS.map(([v,l])=>`<option value="${v}" ${editF&&editF.forma===v?'selected':''}>${l}</option>`).join('')}</select>
           </div>
         </div>
         <div class="row" id="fixa-cartao-field" hidden>
-          <div class="field"><label>Cartão</label><select name="cartaoId">${cartaoOptions}</select></div>
+          <div class="field"><label>Cartão</label><select name="cartaoId">${Object.entries(state.cartoes).map(([id,c])=>`<option value="${id}" ${editF&&editF.cartaoId===id?'selected':''}>${c.nome} (${labelPessoa(c.titular)})</option>`).join('')}</select></div>
         </div>
-        <button type="submit">Adicionar</button>
+        <button type="submit">${editF?'Salvar alterações':'Adicionar'}</button>
+        ${editF ? `<button type="button" class="secondary" id="btn-cancelar-edicao-fixa">Cancelar edição</button>` : ''}
       </form>
     </div>
     <div class="panel-block">
@@ -1240,7 +1352,7 @@ function renderContasFixas(el){
         <h2 style="border:none;">Contas fixas cadastradas</h2>
         <button id="btn-gerar-mes" class="secondary">Gerar lançamentos do mês</button>
       </div>
-      <p class="hint">Valor, dia de vencimento e meses restantes salvam ao sair do campo.${temMensalidadeAntiga ? ' Use "converter em lançamentos" nas mensalidades antigas abaixo para já gerar de uma vez todas as parcelas que faltam, sem precisar clicar todo mês.' : ''}</p>
+      <p class="hint">Valor, dia de vencimento e meses restantes salvam ao sair do campo. Use "editar" pra mudar descrição, categoria, responsável, forma ou cartão.${temMensalidadeAntiga ? ' Use "converter em lançamentos" nas mensalidades antigas abaixo para já gerar de uma vez todas as parcelas que faltam, sem precisar clicar todo mês.' : ''}</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Descrição</th><th class="num">Valor</th><th class="num">Vence</th><th class="num">Meses</th><th>Status</th><th></th></tr></thead>
         <tbody>${linhas || '<tr><td colspan="6" class="empty">Nenhuma conta fixa cadastrada.</td></tr>'}</tbody>
@@ -1253,23 +1365,40 @@ function renderContasFixas(el){
     document.getElementById('fixa-cartao-field').hidden = formaSel.value!=='credito';
   };
   formaSel.addEventListener('change', toggle);
+  toggle();
 
   document.getElementById('form-fixa').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    push(ref(db,'contasFixas'), {
-      descricao:fd.get('descricao'), valor:Number(fd.get('valor')), tipo:'recorrente', mesesRestantes:0,
-      diaVencimento:Number(fd.get('diaVencimento')), categoriaId:fd.get('categoriaId')||'',
-      responsavel:fd.get('responsavel'), forma:fd.get('forma'), cartaoId:fd.get('cartaoId')||'', geradoEm:{}
-    });
+    const dados = {
+      descricao:fd.get('descricao'), valor:Number(fd.get('valor')),
+      diaVencimento:Number(fd.get('diaVencimento'))||5, categoriaId:fd.get('categoriaId')||'',
+      responsavel:fd.get('responsavel'), forma:fd.get('forma'), cartaoId:fd.get('cartaoId')||''
+    };
+    if(editandoFixa){
+      update(ref(db,'contasFixas/'+editandoFixa), dados);
+      editandoFixa = null;
+    } else {
+      push(ref(db,'contasFixas'), { ...dados, tipo:'recorrente', mesesRestantes:0, geradoEm:{} });
+    }
     e.target.reset();
-    toggle();
+    renderContasFixas(el);
   });
 
   el.querySelectorAll('input[data-fixa]').forEach(inp=>{
     inp.addEventListener('change', ()=>{
       update(ref(db,'contasFixas/'+inp.dataset.fixa), { [inp.dataset.campo]: Number(inp.value)||0 });
     });
+  });
+  el.querySelectorAll('[data-edit-fixa]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      editandoFixa = b.dataset.editFixa;
+      renderContasFixas(el);
+    });
+  });
+  document.getElementById('btn-cancelar-edicao-fixa')?.addEventListener('click', ()=>{
+    editandoFixa = null;
+    renderContasFixas(el);
   });
 
   document.getElementById('btn-gerar-mes').addEventListener('click', ()=>{
@@ -1292,7 +1421,10 @@ function renderContasFixas(el){
       update(ref(db,'contasFixas/'+id), updates);
     });
   });
-  el.querySelectorAll('[data-del-fixa]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'contasFixas/'+b.dataset.delFixa))));
+  el.querySelectorAll('[data-del-fixa]').forEach(b=> b.addEventListener('click', ()=>{
+    if(editandoFixa===b.dataset.delFixa) editandoFixa = null;
+    remove(ref(db,'contasFixas/'+b.dataset.delFixa));
+  }));
   el.querySelectorAll('[data-converter-fixa]').forEach(b=>{
     b.addEventListener('click', ()=>{
       const id = b.dataset.converterFixa;
