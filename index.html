@@ -633,6 +633,12 @@ function renderLancamentos(){
             </select>
           </div>
           <div class="field" id="lanc-parcelas-qtd-field" hidden><label>Quantas parcelas</label><input type="number" name="parcelas" min="2" value="2"></div>
+          <div class="field" id="lanc-valor-modo-field" hidden><label>O valor digitado acima é</label>
+            <select id="lanc-valor-modo" name="valorModo">
+              <option value="parcela">De cada parcela (ex.: mensalidade de R$182,52 por 3 meses)</option>
+              <option value="total">Da compra inteira, dividir igual pelas parcelas</option>
+            </select>
+          </div>
         </div>
         <div class="row" id="lanc-casal-fields" hidden>
           <div class="field"><label>Divisão</label>
@@ -679,7 +685,9 @@ function renderLancamentos(){
 
     const showParcela = isDespesa && forma==='credito';
     document.getElementById('lanc-parcela-row').hidden = !showParcela;
-    document.getElementById('lanc-parcelas-qtd-field').hidden = !(showParcela && parceladoSel.value==='sim');
+    const showParcelasDetalhe = showParcela && parceladoSel.value==='sim';
+    document.getElementById('lanc-parcelas-qtd-field').hidden = !showParcelasDetalhe;
+    document.getElementById('lanc-valor-modo-field').hidden = !showParcelasDetalhe;
 
     document.getElementById('lanc-casal-fields').hidden = respSel.value !== 'casal';
   };
@@ -721,12 +729,13 @@ function renderLancamentos(){
       const cartaoId = fd.get('cartaoId') || '';
       const parcelado = forma==='credito' && parceladoSel.value==='sim';
       const parcelas = parcelado ? Math.max(2, Number(fd.get('parcelas')||2)) : 1;
+      const valorModo = fd.get('valorModo') || 'parcela';
 
       if(forma==='credito'){
         const cartao = state.cartoes[cartaoId];
         if(!cartao){ alert('Selecione um cartão de crédito cadastrado.'); return; }
         const comps = gerarCompetencias(data, Number(cartao.diaFechamento), parcelas);
-        const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
+        const valorParcela = valorModo==='total' ? Math.round((valorTotal/parcelas)*100)/100 : valorTotal;
         comps.forEach((comp,idx)=>{
           push(ref(db,'lancamentos'), {
             tipo:'despesa', data, competencia:comp,
