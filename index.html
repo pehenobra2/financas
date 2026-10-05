@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Finanças Pedro e Sofia</title>
+<title>Razão, controle financeiro de Pedro e Sofia</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -77,6 +77,7 @@
     justify-content:center;
     background:var(--paper);
   }
+  #login-screen[hidden]{display:none;}
   #login-screen .box{
     background:var(--panel);
     border:1px solid var(--paper-line);
@@ -265,8 +266,8 @@ const state = {
   lancamentos: {},
   metas: {},
   rendas: {},
-  recorrencias: {},
-  casamento: { dataCasamento:"", metaReservaMensal:0, reservaAcumulada:0, grupo1:{}, grupo2:{} }
+  contasFixas: {},
+  casamento: { dataCasamento:"", metaReservaMensal:0, reservaAcumulada:0 }
 };
 let view = "casal"; // 'pedro' | 'sofia' | 'casal'
 
@@ -311,11 +312,9 @@ function startListeners(){
   onValue(ref(db,'lancamentos'), s=>{ state.lancamentos = s.val()||{}; renderAll(); });
   onValue(ref(db,'metas'), s=>{ state.metas = s.val()||{}; renderAll(); });
   onValue(ref(db,'rendas'), s=>{ state.rendas = s.val()||{}; renderAll(); });
-  onValue(ref(db,'recorrencias'), s=>{ state.recorrencias = s.val()||{}; renderAll(); });
+  onValue(ref(db,'contasFixas'), s=>{ state.contasFixas = s.val()||{}; renderAll(); });
   onValue(ref(db,'casamento'), s=>{
-    state.casamento = s.val() || { dataCasamento:"", metaReservaMensal:0, reservaAcumulada:0, grupo1:{}, grupo2:{} };
-    state.casamento.grupo1 = state.casamento.grupo1 || {};
-    state.casamento.grupo2 = state.casamento.grupo2 || {};
+    state.casamento = s.val() || { dataCasamento:"", metaReservaMensal:0, reservaAcumulada:0 };
     state.casamento.reservaAcumulada = state.casamento.reservaAcumulada || 0;
     renderAll();
   });
@@ -363,6 +362,40 @@ function inicioFimSemana(d){
   return [seg.toISOString().slice(0,10), dom.toISOString().slice(0,10)];
 }
 
+function inicioFimMes(d){
+  const dt = new Date(d+"T00:00:00");
+  const ini = new Date(dt.getFullYear(), dt.getMonth(), 1);
+  const fim = new Date(dt.getFullYear(), dt.getMonth()+1, 0);
+  return [ini.toISOString().slice(0,10), fim.toISOString().slice(0,10)];
+}
+
+function inicioFimAno(d){
+  const dt = new Date(d+"T00:00:00");
+  return [`${dt.getFullYear()}-01-01`, `${dt.getFullYear()}-12-31`];
+}
+
+// Gasto real por data da transação (não pela competência da fatura), usado
+// no resumo de gastos do dia a dia (hoje, semana, mês, ano).
+function gastoNoPeriodo(inicio, fim, visao){
+  return Object.values(state.lancamentos)
+    .filter(l => (l.tipo||'despesa')==='despesa' && l.data>=inicio && l.data<=fim)
+    .reduce((s,l)=> s+valorParaVisao(l,visao), 0);
+}
+
+// Uma fonte de renda recorrente só conta num mês (AAAA-MM) se esse mês
+// estiver dentro do período dela. Sem dataInicio/dataFim = sempre ativa.
+function rendaAtivaNoMes(r, mes){
+  if(r.dataInicio && mes < r.dataInicio) return false;
+  if(r.dataFim && mes > r.dataFim) return false;
+  return true;
+}
+
+function formatMesAno(ym){
+  if(!ym) return '';
+  const [y,m] = ym.split('-');
+  return `${m}/${y}`;
+}
+
 function limiteCategoria(cat, visao, periodo){
   if(!cat) return 0;
   const chave = (periodo==='mensal' ? 'limMes' : 'limSem') + (visao==='pedro'?'Pedro':visao==='sofia'?'Sofia':'Casal');
@@ -370,7 +403,7 @@ function limiteCategoria(cat, visao, periodo){
 }
 
 function gastoCategoria(catId, visao, periodo){
-  const list = Object.values(state.lancamentos).filter(l=>l.categoriaId===catId);
+  const list = Object.values(state.lancamentos).filter(l=>l.categoriaId===catId && (l.tipo||'despesa')==='despesa');
   let total = 0;
   if(periodo==='mensal'){
     const comp = mesAtual();
@@ -425,14 +458,28 @@ function renderDashboard(){
   const comp = mesAtual();
 
   const gastosMes = Object.values(state.lancamentos)
-    .filter(l => (l.competencia||l.data.slice(0,7))===comp)
+    .filter(l => (l.tipo||'despesa')==='despesa' && (l.competencia||l.data.slice(0,7))===comp)
     .reduce((s,l)=> s+valorParaVisao(l,view), 0);
 
-  const rendaMes = Object.values(state.rendas)
-    .filter(r => view==='casal' || r.responsavel===view || r.responsavel==='casal')
-    .reduce((s,r)=> s + (r.recorrente ? Number(r.valor)||0 : 0), 0);
+  const rendaRecorrenteMes = Object.values(state.rendas)
+    .filter(r => (view==='casal' || r.responsavel===view || r.responsavel==='casal') && r.recorrente && rendaAtivaNoMes(r, comp))
+    .reduce((s,r)=> s + (Number(r.valor)||0), 0);
+
+  const receitasLancadasMes = Object.values(state.lancamentos)
+    .filter(l => l.tipo==='receita' && (l.competencia||l.data.slice(0,7))===comp)
+    .reduce((s,l)=> s+valorParaVisao(l,view), 0);
+
+  const rendaMes = rendaRecorrenteMes + receitasLancadasMes;
 
   const saldo = rendaMes - gastosMes;
+
+  const gastoHoje = gastoNoPeriodo(hoje(), hoje(), view);
+  const [segS,domS] = inicioFimSemana(hoje());
+  const gastoSemana = gastoNoPeriodo(segS, domS, view);
+  const [iniM,fimM] = inicioFimMes(hoje());
+  const gastoMesReal = gastoNoPeriodo(iniM, fimM, view);
+  const [iniA,fimA] = inicioFimAno(hoje());
+  const gastoAno = gastoNoPeriodo(iniA, fimA, view);
 
   const cas = state.casamento;
   const meses = mesesAte(cas.dataCasamento);
@@ -444,7 +491,7 @@ function renderDashboard(){
   const faturasHtml = Object.entries(state.cartoes).map(([id,c])=>{
     if(view!=='casal' && c.titular!==view && c.titular!=='casal') return '';
     const totalFatura = Object.values(state.lancamentos)
-      .filter(l=>l.cartaoId===id && l.competencia===comp)
+      .filter(l=>l.cartaoId===id && l.forma==='credito' && l.competencia===comp)
       .reduce((s,l)=> s+Number(l.valor||0), 0);
     const venc = dataVencimento(comp, c.diaFechamento, c.diaVencimento);
     const dias = Math.ceil((new Date(venc) - new Date(hoje()))/86400000);
@@ -471,13 +518,24 @@ function renderDashboard(){
       ${alertas.map(a=>`<div class="alert-banner ${a.nivel==='warn'?'warn':''}">${a.texto}</div>`).join('')}
     </div>` : ''}
 
+    <div class="panel-block">
+      <h2>Resumo de gastos</h2>
+      <p class="hint">Baseado na data real de cada gasto, para o planejamento do dia a dia (não é a fatura do cartão, que considera o mês de fechamento).</p>
+      <div class="cards-grid">
+        <div class="stat-card"><div class="label">Hoje</div><div class="value">${fmtBRL(gastoHoje)}</div></div>
+        <div class="stat-card"><div class="label">Esta semana</div><div class="value">${fmtBRL(gastoSemana)}</div></div>
+        <div class="stat-card"><div class="label">Este mês</div><div class="value">${fmtBRL(gastoMesReal)}</div></div>
+        <div class="stat-card"><div class="label">Este ano</div><div class="value">${fmtBRL(gastoAno)}</div></div>
+      </div>
+    </div>
+
     <div class="cards-grid" style="margin-bottom:1.2em;">
       <div class="stat-card ${saldo<0?'bad':'good'}">
         <div class="label">Saldo do mês</div>
         <div class="value">${fmtBRL(saldo)}</div>
       </div>
       <div class="stat-card">
-        <div class="label">Gasto no mês</div>
+        <div class="label">Gasto no mês (fatura)</div>
         <div class="value">${fmtBRL(gastosMes)}</div>
       </div>
       <div class="stat-card">
@@ -524,41 +582,57 @@ function renderLancamentos(){
   const lista = Object.entries(state.lancamentos)
     .sort((a,b)=> b[1].data.localeCompare(a[1].data))
     .slice(0,80)
-    .map(([id,l])=>`
+    .map(([id,l])=>{
+      const isReceita = l.tipo==='receita';
+      return `
       <tr>
         <td>${l.data.split('-').reverse().join('/')}</td>
         <td>${l.descricao}</td>
-        <td>${state.categorias[l.categoriaId]?.nome || '-'}</td>
+        <td>${isReceita ? '<span class="pill" style="border-color:var(--good-soft);color:var(--good)">receita</span>' : (state.categorias[l.categoriaId]?.nome || '-')}</td>
         <td>${labelPessoa(l.responsavel)}</td>
-        <td>${FORMAS.find(f=>f[0]===l.forma)?.[1]||l.forma}</td>
-        <td class="num">${fmtBRL(l.valor)}</td>
+        <td>${isReceita ? '-' : (FORMAS.find(f=>f[0]===l.forma)?.[1]||l.forma)}</td>
+        <td class="num" style="color:${isReceita?'var(--good)':'var(--bad)'}">${isReceita?'+':'-'} ${fmtBRL(l.valor)}</td>
         <td><button class="danger small" data-del-lanc="${id}">excluir</button></td>
       </tr>
-    `).join('');
+    `;}).join('');
 
   el.innerHTML = `
     <div class="panel-block">
       <h2>Novo lançamento</h2>
       <form id="form-lancamento">
         <div class="row">
+          <div class="field"><label>Tipo</label>
+            <select name="tipo" id="lanc-tipo">
+              <option value="despesa">Despesa</option>
+              <option value="receita">Receita</option>
+            </select>
+          </div>
           <div class="field"><label>Data</label><input type="date" name="data" value="${hoje()}" required></div>
           <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
           <div class="field"><label>Valor (R$)</label><input type="number" step="0.01" min="0.01" name="valor" required></div>
         </div>
         <div class="row">
-          <div class="field"><label>Categoria</label>
-            <select name="categoriaId" required>${catOptions || '<option value="">cadastre uma categoria primeiro</option>'}</select>
+          <div class="field" id="lanc-categoria-field"><label>Categoria</label>
+            <select name="categoriaId" id="lanc-categoria">${catOptions || '<option value="">cadastre uma categoria primeiro</option>'}</select>
           </div>
           <div class="field"><label>Responsável</label>
             <select name="responsavel" id="lanc-responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
           </div>
-          <div class="field"><label>Forma de pagamento</label>
+          <div class="field" id="lanc-forma-field"><label>Forma de pagamento</label>
             <select name="forma" id="lanc-forma">${FORMAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
           </div>
         </div>
-        <div class="row" id="lanc-credito-fields" hidden>
-          <div class="field"><label>Cartão</label><select name="cartaoId">${cartaoOptions}</select></div>
-          <div class="field"><label>Parcelas</label><input type="number" name="parcelas" min="1" value="1"></div>
+        <div class="row" id="lanc-cartao-field" hidden>
+          <div class="field"><label>Cartão</label><select name="cartaoId">${cartaoOptions || '<option value="">cadastre um cartão primeiro</option>'}</select></div>
+        </div>
+        <div class="row" id="lanc-parcela-row" hidden>
+          <div class="field"><label>Parcelado?</label>
+            <select id="lanc-parcelado">
+              <option value="nao">Não</option>
+              <option value="sim">Sim</option>
+            </select>
+          </div>
+          <div class="field" id="lanc-parcelas-qtd-field" hidden><label>Quantas parcelas</label><input type="number" name="parcelas" min="2" value="2"></div>
         </div>
         <div class="row" id="lanc-casal-fields" hidden>
           <div class="field"><label>Divisão</label>
@@ -585,14 +659,36 @@ function renderLancamentos(){
     </div>
   `;
 
+  const tipoSel = document.getElementById('lanc-tipo');
   const formaSel = document.getElementById('lanc-forma');
   const respSel = document.getElementById('lanc-responsavel');
+  const categoriaSel = document.getElementById('lanc-categoria');
+  const cartaoSel = document.querySelector('#lanc-cartao-field select[name=cartaoId]');
+  const parceladoSel = document.getElementById('lanc-parcelado');
+
   const toggleFields = ()=>{
-    document.getElementById('lanc-credito-fields').hidden = formaSel.value !== 'credito';
+    const isDespesa = tipoSel.value === 'despesa';
+    document.getElementById('lanc-categoria-field').hidden = !isDespesa;
+    document.getElementById('lanc-forma-field').hidden = !isDespesa;
+    categoriaSel.required = isDespesa;
+
+    const forma = formaSel.value;
+    const showCartao = isDespesa && (forma==='credito' || forma==='debito');
+    document.getElementById('lanc-cartao-field').hidden = !showCartao;
+    cartaoSel.required = isDespesa && forma==='credito';
+
+    const showParcela = isDespesa && forma==='credito';
+    document.getElementById('lanc-parcela-row').hidden = !showParcela;
+    document.getElementById('lanc-parcelas-qtd-field').hidden = !(showParcela && parceladoSel.value==='sim');
+
     document.getElementById('lanc-casal-fields').hidden = respSel.value !== 'casal';
   };
+  tipoSel.addEventListener('change', toggleFields);
   formaSel.addEventListener('change', toggleFields);
   respSel.addEventListener('change', toggleFields);
+  parceladoSel.addEventListener('change', toggleFields);
+  toggleFields();
+
   const divisaoSel = document.getElementById('lanc-divisao');
   divisaoSel?.addEventListener('change', ()=>{
     const isProp = divisaoSel.value==='proporcional';
@@ -603,36 +699,51 @@ function renderLancamentos(){
   document.getElementById('form-lancamento').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
+    const tipo = fd.get('tipo');
     const data = fd.get('data');
     const descricao = fd.get('descricao');
     const valorTotal = Number(fd.get('valor'));
-    const categoriaId = fd.get('categoriaId');
     const responsavel = fd.get('responsavel');
-    const forma = fd.get('forma');
     const divisaoModo = fd.get('divisaoModo') || 'proporcional';
     const percPedro = Number(fd.get('percPedro')||50);
     const percSofia = Number(fd.get('percSofia')||50);
 
-    if(forma==='credito'){
-      const cartaoId = fd.get('cartaoId');
-      const cartao = state.cartoes[cartaoId];
-      const parcelas = Math.max(1, Number(fd.get('parcelas')||1));
-      if(!cartao){ alert('Cadastre um cartão primeiro.'); return; }
-      const comps = gerarCompetencias(data, Number(cartao.diaFechamento), parcelas);
-      const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
-      comps.forEach((comp,idx)=>{
-        push(ref(db,'lancamentos'), {
-          data, competencia:comp,
-          descricao: descricao + (parcelas>1 ? ` (${idx+1}/${parcelas})` : ''),
-          valor: valorParcela, categoriaId, responsavel, forma, cartaoId,
-          divisaoModo, percPedro, percSofia
-        });
+    if(tipo==='receita'){
+      push(ref(db,'lancamentos'), {
+        tipo:'receita', data, competencia:data.slice(0,7), descricao, valor:valorTotal,
+        categoriaId:'', responsavel, forma:'', cartaoId:'',
+        parcelaAtual:1, parcelaTotal:1,
+        divisaoModo, percPedro, percSofia
       });
     } else {
-      push(ref(db,'lancamentos'), {
-        data, competencia:data.slice(0,7), descricao, valor:valorTotal,
-        categoriaId, responsavel, forma, divisaoModo, percPedro, percSofia
-      });
+      const categoriaId = fd.get('categoriaId');
+      const forma = fd.get('forma');
+      const cartaoId = fd.get('cartaoId') || '';
+      const parcelado = forma==='credito' && parceladoSel.value==='sim';
+      const parcelas = parcelado ? Math.max(2, Number(fd.get('parcelas')||2)) : 1;
+
+      if(forma==='credito'){
+        const cartao = state.cartoes[cartaoId];
+        if(!cartao){ alert('Selecione um cartão de crédito cadastrado.'); return; }
+        const comps = gerarCompetencias(data, Number(cartao.diaFechamento), parcelas);
+        const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
+        comps.forEach((comp,idx)=>{
+          push(ref(db,'lancamentos'), {
+            tipo:'despesa', data, competencia:comp,
+            descricao: descricao + (parcelas>1 ? ` (${idx+1}/${parcelas})` : ''),
+            valor: valorParcela, categoriaId, responsavel, forma, cartaoId,
+            parcelaAtual: idx+1, parcelaTotal: parcelas,
+            divisaoModo, percPedro, percSofia
+          });
+        });
+      } else {
+        push(ref(db,'lancamentos'), {
+          tipo:'despesa', data, competencia:data.slice(0,7), descricao, valor:valorTotal,
+          categoriaId, responsavel, forma, cartaoId,
+          parcelaAtual:1, parcelaTotal:1,
+          divisaoModo, percPedro, percSofia
+        });
+      }
     }
     e.target.reset();
     document.querySelector('#form-lancamento [name=data]').value = hoje();
@@ -760,9 +871,9 @@ function renderPlanejamento(){
   el.innerHTML = `
     <div class="subtabs" id="sub-planejamento">
       <button data-sub="casamento" class="${subtabPlanejamento==='casamento'?'active':''}">Casamento</button>
+      <button data-sub="contasfixas" class="${subtabPlanejamento==='contasfixas'?'active':''}">Contas fixas</button>
       <button data-sub="metas" class="${subtabPlanejamento==='metas'?'active':''}">Metas</button>
       <button data-sub="renda" class="${subtabPlanejamento==='renda'?'active':''}">Renda</button>
-      <button data-sub="recorrencias" class="${subtabPlanejamento==='recorrencias'?'active':''}">Recorrências</button>
     </div>
     <div id="sub-content"></div>
   `;
@@ -773,24 +884,67 @@ function renderPlanejamento(){
   });
   const c = document.getElementById('sub-content');
   if(subtabPlanejamento==='casamento') renderCasamento(c);
+  if(subtabPlanejamento==='contasfixas') renderContasFixas(c);
   if(subtabPlanejamento==='metas') renderMetas(c);
   if(subtabPlanejamento==='renda') renderRenda(c);
-  if(subtabPlanejamento==='recorrencias') renderRecorrencias(c);
+}
+
+// Soma as contas fixas de um mês, unificando duas origens:
+// 1) a coleção "contasFixas" (assinaturas, gasolina etc., sempre; e mensalidades
+//    antigas ainda não convertidas, enquanto restarem meses);
+// 2) despesas lançadas em "Lançamentos" como parceladas (parcelaTotal>1), cuja
+//    competência cai nesse mês (mensalidades e financiamentos no cartão).
+// "indiceRelativo" é quantos meses à frente do mês atual o "mes" está (0 = mês atual).
+function totalContasFixasMes(mes, indiceRelativo){
+  let total = Object.values(state.contasFixas).reduce((s,it)=>{
+    if(it.tipo==='parcela'){
+      const restante = Number(it.mesesRestantes||0) - indiceRelativo;
+      if(restante<=0) return s;
+    }
+    return s + Number(it.valor||0);
+  },0);
+
+  total += Object.values(state.lancamentos).reduce((s,l)=>{
+    if((l.tipo||'despesa')!=='despesa') return s;
+    if(!(Number(l.parcelaTotal||1) > 1)) return s;
+    const comp = l.competencia || l.data.slice(0,7);
+    if(comp!==mes) return s;
+    return s + Number(l.valor||0);
+  },0);
+
+  return total;
+}
+
+// Gera N lançamentos mensais (um por mês, a partir do mês atual) para uma
+// mensalidade ou financiamento com prazo para acabar. Usado tanto na
+// conversão de contas fixas antigas quanto na importação da planilha.
+function gerarParcelasFixas({descricao, valor, categoriaId, responsavel, forma, cartaoId, diaVencimento, nParcelas}){
+  for(let i=0;i<nParcelas;i++){
+    const d = new Date(); d.setMonth(d.getMonth()+i);
+    const mes = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const data = `${mes}-${String(diaVencimento||5).padStart(2,'0')}`;
+    let competencia = mes;
+    if(forma==='credito' && cartaoId && state.cartoes[cartaoId]){
+      competencia = gerarCompetencias(data, Number(state.cartoes[cartaoId].diaFechamento), 1)[0];
+    }
+    push(ref(db,'lancamentos'), {
+      tipo:'despesa', data, competencia,
+      descricao: `${descricao} (${i+1}/${nParcelas})`,
+      valor: Number(valor), categoriaId: categoriaId||'', responsavel, forma, cartaoId: cartaoId||'',
+      parcelaAtual: i+1, parcelaTotal: nParcelas,
+      divisaoModo:'proporcional', percPedro:50, percSofia:50
+    });
+  }
 }
 
 function renderCasamento(el){
   const cas = state.casamento;
-  const grupo1 = Object.entries(cas.grupo1||{});
-  const grupo2 = Object.entries(cas.grupo2||{});
-  const totalGrupo1 = grupo1.reduce((s,[,it])=>s+Number(it.valor||0),0);
-  const totalGrupo2 = grupo2.reduce((s,[,it])=>s+Number(it.valor||0),0);
-  const totalFixo = totalGrupo1 + totalGrupo2;
-  const rendaTotal = Object.values(state.rendas).filter(r=>r.recorrente).reduce((s,r)=>s+Number(r.valor||0),0);
+  const mesRef = mesAtual();
+  const totalFixo = totalContasFixasMes(mesRef, 0);
+  const rendaTotal = Object.values(state.rendas).filter(r=>r.recorrente && rendaAtivaNoMes(r, mesRef)).reduce((s,r)=>s+Number(r.valor||0),0);
   const sobra = rendaTotal - totalFixo;
   const faltaParaMeta = Math.max(0, Number(cas.metaReservaMensal||0) - sobra);
-
-  const linhasG1 = grupo1.map(([id,it])=>`<tr><td>${it.descricao}</td><td>${labelPessoa(it.responsavel)}</td><td class="num">${fmtBRL(it.valor)}</td><td class="num">${it.mesesRestantes}</td><td><button class="danger small" data-del-g1="${id}">excluir</button></td></tr>`).join('');
-  const linhasG2 = grupo2.map(([id,it])=>`<tr><td>${it.descricao}</td><td>${labelPessoa(it.responsavel)}</td><td class="num">${fmtBRL(it.valor)}</td><td><button class="danger small" data-del-g2="${id}">excluir</button></td></tr>`).join('');
+  const jaTemDados = Object.keys(state.contasFixas).length>0 || Object.keys(state.categorias).length>0;
 
   el.innerHTML = `
     <div class="panel-block">
@@ -813,34 +967,14 @@ function renderCasamento(el){
       </div>
     </div>
 
-    <div class="panel-block">
-      <h3>Grupo 1, parcelas com prazo</h3>
-      <form id="form-g1" class="row">
-        <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-        <div class="field"><label>Valor mensal</label><input type="number" step="0.01" name="valor" required></div>
-        <div class="field"><label>Meses restantes</label><input type="number" name="mesesRestantes" required></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
-      </form>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor/mês</th><th class="num">Meses</th><th></th></tr></thead>
-        <tbody>${linhasG1 || '<tr><td colspan="5" class="empty">Nada cadastrado.</td></tr>'}</tbody>
-      </table></div>
-    </div>
+    <p class="hint">O total de contas fixas acima soma tudo que está cadastrado na aba "Contas fixas", ao lado (mensalidades com prazo + despesas fixas recorrentes).</p>
 
+    ${!jaTemDados ? `
     <div class="panel-block">
-      <h3>Grupo 2, gastos recorrentes</h3>
-      <form id="form-g2" class="row">
-        <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-        <div class="field"><label>Valor mensal</label><input type="number" step="0.01" name="valor" required></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
-      </form>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor/mês</th><th></th></tr></thead>
-        <tbody>${linhasG2 || '<tr><td colspan="4" class="empty">Nada cadastrado.</td></tr>'}</tbody>
-      </table></div>
-    </div>
+      <h3>Começar com os dados da planilha</h3>
+      <p class="hint">Importa de uma vez as categorias (Alimentação, Lazer), as contas fixas e a renda que já estavam na planilha de projeção que você enviou, assim você não digita tudo de novo.</p>
+      <button id="btn-importar-planilha">Importar dados da planilha</button>
+    </div>` : ''}
   `;
 
   document.getElementById('cas-salvar').addEventListener('click', ()=>{
@@ -854,20 +988,60 @@ function renderCasamento(el){
     if(!v) return;
     update(ref(db,'casamento'), { reservaAcumulada: Number(cas.reservaAcumulada||0)+v });
   });
-  document.getElementById('form-g1').addEventListener('submit', e=>{
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    push(ref(db,'casamento/grupo1'), {descricao:fd.get('descricao'), valor:Number(fd.get('valor')), mesesRestantes:Number(fd.get('mesesRestantes')), responsavel:fd.get('responsavel')});
-    e.target.reset();
+  document.getElementById('btn-importar-planilha')?.addEventListener('click', importarDadosPlanilha);
+}
+
+function mesesRestantesAte(endMonthStr){
+  const [ey,em] = endMonthStr.split('-').map(Number);
+  const now = new Date();
+  const diff = (ey-now.getFullYear())*12 + (em-1-now.getMonth());
+  return Math.max(0, diff) + 1;
+}
+
+function importarDadosPlanilha(){
+  if(!confirm('Isso vai cadastrar as categorias, contas fixas e a renda da planilha de projeção do casamento. Continuar?')) return;
+
+  push(ref(db,'categorias'), { nome:'Alimentação', limMesCasal:1400, limMesPedro:0, limMesSofia:0, limSemCasal:0, limSemPedro:0, limSemSofia:0 });
+  push(ref(db,'categorias'), { nome:'Lazer', limMesCasal:400, limMesPedro:0, limMesSofia:0, limSemCasal:0, limSemPedro:0, limSemSofia:0 });
+
+  const parcelas = [
+    ['Vestido','sofia',1040,'2026-10'],
+    ['Roupa','sofia',140,'2026-10'],
+    ['Aliança','pedro',375,'2026-10'],
+    ['Temu','pedro',26.88,'2026-10'],
+    ['Espaço Renascença (parcela extra)','pedro',182.52,'2026-11'],
+    ['FM 26','pedro',31.53,'2026-12'],
+    ['Ballet','sofia',256,'2026-12'],
+    ['Notebook','pedro',269.39,'2027-05'],
+    ['Carro da vó (estimado, ajustar quando confirmado)','pedro',380,'2027-06'],
+    ['Celular','sofia',315,'2027-07'],
+    ['Salão casamento','pedro',1684.93,'2027-07'],
+  ];
+  parcelas.forEach(([descricao,responsavel,valor,endMonth])=>{
+    const nParcelas = mesesRestantesAte(endMonth);
+    if(nParcelas>0){
+      gerarParcelasFixas({ descricao, valor, categoriaId:'', responsavel, forma:'debito', cartaoId:'', diaVencimento:5, nParcelas });
+    }
   });
-  document.getElementById('form-g2').addEventListener('submit', e=>{
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    push(ref(db,'casamento/grupo2'), {descricao:fd.get('descricao'), valor:Number(fd.get('valor')), responsavel:fd.get('responsavel')});
-    e.target.reset();
+
+  const recorrentes = [
+    ['Gasolina','casal',400],
+    ['Claude','casal',119.99],
+    ['iCloud','casal',33.45],
+    ['Contabo (servidor Realli)','casal',27.32],
+  ];
+  recorrentes.forEach(([descricao,responsavel,valor])=>{
+    push(ref(db,'contasFixas'), {
+      descricao, valor, responsavel, tipo:'recorrente', mesesRestantes:0,
+      diaVencimento:5, categoriaId:'', forma:'debito', cartaoId:'', geradoEm:{}
+    });
   });
-  el.querySelectorAll('[data-del-g1]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'casamento/grupo1/'+b.dataset.delG1))));
-  el.querySelectorAll('[data-del-g2]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'casamento/grupo2/'+b.dataset.delG2))));
+
+  push(ref(db,'rendas'), { descricao:'Renda combinada (Sofia + Pedro)', valor:8166.77, responsavel:'casal', recorrente:true });
+
+  update(ref(db,'casamento'), { dataCasamento:'2027-08-22', metaReservaMensal:3693.28 });
+
+  alert('Pronto. As mensalidades já entraram como lançamentos (aba Lançamentos) e as despesas recorrentes entraram em Contas fixas. O dia de vencimento veio como dia 5, um padrão, ajuste o que for diferente.');
 }
 
 function renderMetas(el){
@@ -919,102 +1093,224 @@ function renderMetas(el){
 }
 
 function renderRenda(el){
-  const linhas = Object.entries(state.rendas).map(([id,r])=>`
-    <tr><td>${r.descricao}</td><td>${labelPessoa(r.responsavel)}</td><td class="num">${fmtBRL(r.valor)}</td>
-    <td>${r.recorrente?'Recorrente':'Único'}</td><td><button class="danger small" data-del-renda="${id}">excluir</button></td></tr>
-  `).join('');
+  const comp = mesAtual();
+  const linhas = Object.entries(state.rendas).map(([id,r])=>{
+    const encerrada = r.recorrente && r.dataFim && r.dataFim < comp;
+    let periodoTxt = 'sem data definida';
+    if(r.recorrente){
+      const ini = r.dataInicio ? formatMesAno(r.dataInicio) : null;
+      const fim = r.dataFim ? formatMesAno(r.dataFim) : null;
+      if(ini && fim) periodoTxt = `${ini} até ${fim}`;
+      else if(fim) periodoTxt = `até ${fim}`;
+      else if(ini) periodoTxt = `desde ${ini}`;
+    }
+    return `
+    <tr>
+      <td>${r.descricao}</td><td>${labelPessoa(r.responsavel)}</td><td class="num">${fmtBRL(r.valor)}</td>
+      <td>${r.recorrente?'Recorrente':'Único'}${r.recorrente?`<div class="hint">${periodoTxt}</div>`:''}</td>
+      <td>${encerrada ? '<span class="pill">encerrada</span>' : (r.recorrente ? '<span class="pill" style="border-color:var(--good-soft);color:var(--good)">ativa</span>' : '')}</td>
+      <td><button class="danger small" data-del-renda="${id}">excluir</button></td>
+    </tr>`;
+  }).join('');
   el.innerHTML = `
     <div class="panel-block">
       <h2>Nova fonte de renda</h2>
-      <form id="form-renda" class="row">
-        <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-        <div class="field"><label>Valor</label><input type="number" step="0.01" name="valor" required></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field"><label>Tipo</label><select name="recorrente"><option value="1">Recorrente (todo mês)</option><option value="0">Único</option></select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
+      <form id="form-renda">
+        <div class="row">
+          <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
+          <div class="field"><label>Valor</label><input type="number" step="0.01" name="valor" required></div>
+          <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+          <div class="field"><label>Tipo</label><select name="recorrente" id="renda-tipo"><option value="1">Recorrente (todo mês)</option><option value="0">Único</option></select></div>
+        </div>
+        <div class="row" id="renda-periodo-fields">
+          <div class="field"><label>A partir de (opcional)</label><input type="month" name="dataInicio"></div>
+          <div class="field"><label>Até quando (opcional)</label><input type="month" name="dataFim"></div>
+        </div>
+        <p class="hint">Deixe "Até quando" em branco se não tem previsão de parar. Quando preencher e o mês passar, a renda some sozinha da conta sem você precisar excluir.</p>
+        <button type="submit">Adicionar</button>
       </form>
     </div>
     <div class="panel-block">
       <h2>Fontes de renda</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor</th><th>Tipo</th><th></th></tr></thead>
-        <tbody>${linhas || '<tr><td colspan="5" class="empty">Nenhuma fonte cadastrada.</td></tr>'}</tbody>
+        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor</th><th>Tipo</th><th>Status</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="6" class="empty">Nenhuma fonte cadastrada.</td></tr>'}</tbody>
       </table></div>
     </div>
   `;
+
+  const rendaTipoSel = document.getElementById('renda-tipo');
+  const togglePeriodo = ()=>{ document.getElementById('renda-periodo-fields').hidden = rendaTipoSel.value!=='1'; };
+  rendaTipoSel.addEventListener('change', togglePeriodo);
+  togglePeriodo();
+
   document.getElementById('form-renda').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    push(ref(db,'rendas'), {descricao:fd.get('descricao'), valor:Number(fd.get('valor')), responsavel:fd.get('responsavel'), recorrente: fd.get('recorrente')==='1'});
+    push(ref(db,'rendas'), {
+      descricao:fd.get('descricao'), valor:Number(fd.get('valor')), responsavel:fd.get('responsavel'),
+      recorrente: fd.get('recorrente')==='1',
+      dataInicio: fd.get('dataInicio')||'', dataFim: fd.get('dataFim')||''
+    });
     e.target.reset();
+    togglePeriodo();
   });
   el.querySelectorAll('[data-del-renda]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'rendas/'+b.dataset.delRenda))));
 }
 
-function renderRecorrencias(el){
+function renderContasFixas(el){
   const catOptions = Object.entries(state.categorias).map(([id,c])=>`<option value="${id}">${c.nome}</option>`).join('');
+  const cartaoOptions = Object.entries(state.cartoes).map(([id,c])=>`<option value="${id}">${c.nome} (${labelPessoa(c.titular)})</option>`).join('');
   const comp = mesAtual();
-  const linhas = Object.entries(state.recorrencias).map(([id,r])=>{
-    const gerado = !!(r.geradoEm && r.geradoEm[comp]);
-    return `<tr>
-      <td>${r.descricao}</td><td>${labelPessoa(r.responsavel)}</td><td class="num">${fmtBRL(r.valor)}</td>
-      <td class="num">${r.diaVencimento}</td>
-      <td>${gerado? '<span class="pill">gerado este mês</span>' : '<span class="pill" style="border-color:var(--gold-soft);color:var(--gold)">pendente</span>'}</td>
-      <td><button class="danger small" data-del-rec="${id}">excluir</button></td>
-    </tr>`;
-  }).join('');
+
+  const linhas = Object.entries(state.contasFixas)
+    .sort((a,b)=> (a[1].descricao||'').localeCompare(b[1].descricao||''))
+    .map(([id,r])=>{
+      const gerado = !!(r.geradoEm && r.geradoEm[comp]);
+      const ehMensalidadeAntiga = r.tipo==='parcela';
+      const finalizada = ehMensalidadeAntiga && Number(r.mesesRestantes||0)<=0;
+      let statusHtml;
+      if(finalizada) statusHtml = '<span class="pill">finalizada</span>';
+      else if(gerado) statusHtml = '<span class="pill">gerado este mês</span>';
+      else statusHtml = '<span class="pill" style="border-color:var(--gold-soft);color:var(--gold)">pendente</span>';
+      return `<tr>
+        <td>${r.descricao}<div class="hint">${ehMensalidadeAntiga?'Mensalidade (antiga)':'Despesa fixa'} · ${labelPessoa(r.responsavel)} · ${FORMAS.find(f=>f[0]===r.forma)?.[1]||r.forma}${r.categoriaId&&state.categorias[r.categoriaId]?' · '+state.categorias[r.categoriaId].nome:''}</div></td>
+        <td><input type="number" class="num" style="width:90px" step="0.01" data-fixa="${id}" data-campo="valor" value="${r.valor}"></td>
+        <td><input type="number" class="num" style="width:55px" data-fixa="${id}" data-campo="diaVencimento" value="${r.diaVencimento}" min="1" max="31"></td>
+        <td class="num">${ehMensalidadeAntiga ? `<input type="number" class="num" style="width:55px" data-fixa="${id}" data-campo="mesesRestantes" value="${r.mesesRestantes}" min="0">` : '-'}</td>
+        <td>${statusHtml}</td>
+        <td>${ehMensalidadeAntiga && !finalizada ? `<button class="secondary small" data-converter-fixa="${id}">converter em lançamentos</button> ` : ''}<button class="danger small" data-del-fixa="${id}">excluir</button></td>
+      </tr>`;
+    }).join('');
+
+  const temMensalidadeAntiga = Object.values(state.contasFixas).some(r=>r.tipo==='parcela' && Number(r.mesesRestantes||0)>0);
 
   el.innerHTML = `
     <div class="panel-block">
-      <h2>Nova conta fixa recorrente</h2>
-      <p class="hint">Como o app não tem servidor próprio rodando o tempo todo, o lançamento do mês não é gerado sozinho: você clica em "gerar lançamentos do mês" (abaixo) quando abrir o app.</p>
-      <form id="form-rec" class="row">
-        <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
-        <div class="field"><label>Valor</label><input type="number" step="0.01" name="valor" required></div>
-        <div class="field"><label>Dia de vencimento</label><input type="number" name="diaVencimento" min="1" max="31" required></div>
-        <div class="field"><label>Categoria</label><select name="categoriaId">${catOptions}</select></div>
-        <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-        <div class="field" style="align-self:flex-end"><button type="submit">Adicionar</button></div>
+      <h2>Nova conta fixa</h2>
+      <p class="hint">Contas fixas aqui são despesas recorrentes sem previsão de término (assinatura, gasolina). Como o app não roda um servidor o tempo todo, o lançamento do mês não se gera sozinho: clique em "gerar lançamentos do mês" (abaixo) quando abrir o app.</p>
+      <p class="hint">Mensalidade ou financiamento com prazo pra acabar (ex.: parcela de um produto, consórcio)? Cadastre direto na aba <strong>Lançamentos</strong>, como despesa, forma crédito, marcando "Parcelado = Sim" e informando quantas parcelas ainda faltam. Todas as parcelas futuras já são geradas de uma vez, sem precisar voltar aqui todo mês.</p>
+      <form id="form-fixa">
+        <div class="row">
+          <div class="field"><label>Descrição</label><input type="text" name="descricao" required></div>
+          <div class="field"><label>Valor mensal (R$)</label><input type="number" step="0.01" name="valor" required></div>
+          <div class="field"><label>Dia de vencimento</label><input type="number" name="diaVencimento" min="1" max="31" required></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Categoria</label><select name="categoriaId"><option value="">(sem categoria)</option>${catOptions}</select></div>
+          <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+          <div class="field"><label>Forma de pagamento</label>
+            <select name="forma" id="fixa-forma">${FORMAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+          </div>
+        </div>
+        <div class="row" id="fixa-cartao-field" hidden>
+          <div class="field"><label>Cartão</label><select name="cartaoId">${cartaoOptions}</select></div>
+        </div>
+        <button type="submit">Adicionar</button>
       </form>
     </div>
     <div class="panel-block">
       <div class="row" style="align-items:center;">
-        <h2 style="border:none;">Recorrências</h2>
+        <h2 style="border:none;">Contas fixas cadastradas</h2>
         <button id="btn-gerar-mes" class="secondary">Gerar lançamentos do mês</button>
       </div>
+      <p class="hint">Valor, dia de vencimento e meses restantes salvam ao sair do campo.${temMensalidadeAntiga ? ' Use "converter em lançamentos" nas mensalidades antigas abaixo para já gerar de uma vez todas as parcelas que faltam, sem precisar clicar todo mês.' : ''}</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th>Resp.</th><th class="num">Valor</th><th class="num">Vence</th><th>Status</th><th></th></tr></thead>
-        <tbody>${linhas || '<tr><td colspan="6" class="empty">Nenhuma recorrência cadastrada.</td></tr>'}</tbody>
+        <thead><tr><th>Descrição</th><th class="num">Valor</th><th class="num">Vence</th><th class="num">Meses</th><th>Status</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="6" class="empty">Nenhuma conta fixa cadastrada.</td></tr>'}</tbody>
       </table></div>
     </div>
   `;
 
-  document.getElementById('form-rec').addEventListener('submit', e=>{
+  const formaSel = document.getElementById('fixa-forma');
+  const toggle = ()=>{
+    document.getElementById('fixa-cartao-field').hidden = formaSel.value!=='credito';
+  };
+  formaSel.addEventListener('change', toggle);
+
+  document.getElementById('form-fixa').addEventListener('submit', e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
-    push(ref(db,'recorrencias'), {
-      descricao:fd.get('descricao'), valor:Number(fd.get('valor')), diaVencimento:Number(fd.get('diaVencimento')),
-      categoriaId:fd.get('categoriaId'), responsavel:fd.get('responsavel'), forma:'debito', geradoEm:{}
+    push(ref(db,'contasFixas'), {
+      descricao:fd.get('descricao'), valor:Number(fd.get('valor')), tipo:'recorrente', mesesRestantes:0,
+      diaVencimento:Number(fd.get('diaVencimento')), categoriaId:fd.get('categoriaId')||'',
+      responsavel:fd.get('responsavel'), forma:fd.get('forma'), cartaoId:fd.get('cartaoId')||'', geradoEm:{}
     });
     e.target.reset();
+    toggle();
   });
-  document.getElementById('btn-gerar-mes').addEventListener('click', ()=>{
-    Object.entries(state.recorrencias).forEach(([id,r])=>{
-      if(r.geradoEm && r.geradoEm[comp]) return;
-      const data = `${comp}-${String(r.diaVencimento).padStart(2,'0')}`;
-      push(ref(db,'lancamentos'), {
-        data, competencia:comp, descricao:r.descricao, valor:Number(r.valor),
-        categoriaId:r.categoriaId, responsavel:r.responsavel, forma:'debito', divisaoModo:'proporcional', percPedro:50, percSofia:50
-      });
-      update(ref(db,'recorrencias/'+id+'/geradoEm'), { [comp]: true });
+
+  el.querySelectorAll('input[data-fixa]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      update(ref(db,'contasFixas/'+inp.dataset.fixa), { [inp.dataset.campo]: Number(inp.value)||0 });
     });
   });
-  el.querySelectorAll('[data-del-rec]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'recorrencias/'+b.dataset.delRec))));
+
+  document.getElementById('btn-gerar-mes').addEventListener('click', ()=>{
+    Object.entries(state.contasFixas).forEach(([id,r])=>{
+      if(r.geradoEm && r.geradoEm[comp]) return;
+      if(r.tipo==='parcela' && Number(r.mesesRestantes||0)<=0) return;
+      const data = `${comp}-${String(r.diaVencimento).padStart(2,'0')}`;
+      let competencia = comp;
+      if(r.forma==='credito' && r.cartaoId && state.cartoes[r.cartaoId]){
+        competencia = gerarCompetencias(data, Number(state.cartoes[r.cartaoId].diaFechamento), 1)[0];
+      }
+      push(ref(db,'lancamentos'), {
+        tipo:'despesa', data, competencia, descricao:r.descricao, valor:Number(r.valor),
+        categoriaId:r.categoriaId, responsavel:r.responsavel, forma:r.forma, cartaoId:r.cartaoId||'',
+        parcelaAtual:1, parcelaTotal:1,
+        divisaoModo:'proporcional', percPedro:50, percSofia:50
+      });
+      const updates = { ['geradoEm/'+comp]: true };
+      if(r.tipo==='parcela') updates.mesesRestantes = Math.max(0, Number(r.mesesRestantes||0)-1);
+      update(ref(db,'contasFixas/'+id), updates);
+    });
+  });
+  el.querySelectorAll('[data-del-fixa]').forEach(b=> b.addEventListener('click', ()=> remove(ref(db,'contasFixas/'+b.dataset.delFixa))));
+  el.querySelectorAll('[data-converter-fixa]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const id = b.dataset.converterFixa;
+      const r = state.contasFixas[id];
+      const nParcelas = Number(r.mesesRestantes||0);
+      if(nParcelas<=0) return;
+      if(!confirm(`Gerar ${nParcelas} lançamento(s) de "${r.descricao}" em Lançamentos (um por mês, a partir deste mês) e remover esta conta fixa antiga?`)) return;
+      gerarParcelasFixas({
+        descricao:r.descricao, valor:r.valor, categoriaId:r.categoriaId,
+        responsavel:r.responsavel, forma:r.forma, cartaoId:r.cartaoId,
+        diaVencimento:r.diaVencimento, nParcelas
+      });
+      remove(ref(db,'contasFixas/'+id));
+    });
+  });
 }
 
 /* ======================================================================
    12) RELATÓRIOS
 ====================================================================== */
+// Projeta renda recorrente ativa menos contas fixas (mensalidades decrescendo
+// mês a mês, despesas recorrentes continuando) para os próximos N meses.
+function projetarFluxo(nMeses){
+  const resultado = [];
+  const hojeD = new Date();
+  let acumulado = 0;
+  for(let i=0;i<nMeses;i++){
+    const d = new Date(hojeD.getFullYear(), hojeD.getMonth()+i, 1);
+    const mes = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+
+    const renda = Object.values(state.rendas).reduce((s,r)=>{
+      if(!r.recorrente || !rendaAtivaNoMes(r, mes)) return s;
+      return s + Number(r.valor||0);
+    },0);
+
+    const fixas = totalContasFixasMes(mes, i);
+
+    const saldo = renda - fixas;
+    acumulado += saldo;
+    resultado.push({mes, renda, fixas, saldo, acumulado});
+  }
+  return resultado;
+}
+
 function renderRelatorios(){
   const el = document.getElementById('tab-relatorios');
   const comp = mesAtual();
@@ -1052,9 +1348,47 @@ function renderRelatorios(){
       <div class="field" style="max-width:260px;"><select id="rel-cat">${opts}</select></div>
       <div id="rel-tendencia" style="margin-top:1em;"></div>
     </div>
+
+    <div class="panel-block">
+      <div class="row" style="align-items:center;">
+        <h2 style="border:none;">Previsão de fluxo de caixa</h2>
+        <div class="field" style="max-width:160px; margin:0;">
+          <select id="rel-horizonte">
+            <option value="6">6 meses</option>
+            <option value="12" selected>12 meses</option>
+            <option value="24">24 meses</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint">Projeta a renda recorrente cadastrada (aba Renda) contra as contas fixas cadastradas (aba Contas fixas), mês a mês, considerando quando cada renda começa/termina e quando cada mensalidade acaba. Não inclui lançamentos avulsos nem gastos variáveis do dia a dia (alimentação, lazer etc.), só o que está fixado nessas duas abas.</p>
+      <div id="rel-previsao"></div>
+    </div>
   `;
 
   document.getElementById('btn-export-csv').addEventListener('click', exportarCSV);
+
+  const horizSel = document.getElementById('rel-horizonte');
+  const desenhaPrevisao = ()=>{
+    const n = Number(horizSel.value);
+    const linhas = projetarFluxo(n);
+    const rows = linhas.map(l=>`
+      <tr>
+        <td>${formatMesAno(l.mes)}</td>
+        <td class="num">${fmtBRL(l.renda)}</td>
+        <td class="num">${fmtBRL(l.fixas)}</td>
+        <td class="num" style="color:${l.saldo<0?'var(--bad)':'var(--good)'}">${fmtBRL(l.saldo)}</td>
+        <td class="num" style="color:${l.acumulado<0?'var(--bad)':'var(--ink)'}">${fmtBRL(l.acumulado)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('rel-previsao').innerHTML = `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Mês</th><th class="num">Renda prevista</th><th class="num">Contas fixas</th><th class="num">Saldo do mês</th><th class="num">Acumulado</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    `;
+  };
+  horizSel.addEventListener('change', desenhaPrevisao);
+  desenhaPrevisao();
 
   const catSel = document.getElementById('rel-cat');
   if(catIds.length){
@@ -1088,9 +1422,9 @@ function renderRelatorios(){
 }
 
 function exportarCSV(){
-  const linhas = [['data','descricao','categoria','responsavel','forma','valor']];
+  const linhas = [['data','tipo','descricao','categoria','responsavel','forma','valor']];
   Object.values(state.lancamentos).sort((a,b)=>a.data.localeCompare(b.data)).forEach(l=>{
-    linhas.push([l.data, l.descricao, state.categorias[l.categoriaId]?.nome||'', l.responsavel, l.forma, String(l.valor).replace('.',',')]);
+    linhas.push([l.data, (l.tipo||'despesa'), l.descricao, state.categorias[l.categoriaId]?.nome||'', l.responsavel, l.forma||'', String(l.valor).replace('.',',')]);
   });
   const csv = linhas.map(l=> l.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(';')).join('\n');
   const blob = new Blob(["\uFEFF"+csv], {type:'text/csv;charset=utf-8;'});
