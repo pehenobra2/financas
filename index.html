@@ -592,25 +592,22 @@ function dataVencimento(competencia, diaFechamento, diaVencimento){
    8) LANÇAMENTOS
 ====================================================================== */
 let editandoLancamento = null;
+
+// Filtros e paginação da lista de lançamentos (persistem entre re-renderizações).
+// mes = '' significa "todos os meses" (aí a lista é paginada de 30 em 30).
+const filtroLanc = { base:'fatura', mes:mesAtual(), resp:'', tipo:'', cat:'', forma:'', cartao:'', q:'', pagina:1 };
+const POR_PAGINA = 30;
+function mesDoLanc(l, base){
+  return base==='data' ? l.data.slice(0,7) : (l.competencia || l.data.slice(0,7));
+}
+function somaMes(ym, delta){
+  const [y,m] = ym.split('-').map(Number);
+  const d = new Date(y, m-1+delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
 function renderLancamentos(){
   const el = document.getElementById('tab-lancamentos');
-
-  const lista = Object.entries(state.lancamentos)
-    .sort((a,b)=> b[1].data.localeCompare(a[1].data))
-    .slice(0,80)
-    .map(([id,l])=>{
-      const isReceita = l.tipo==='receita';
-      return `
-      <tr>
-        <td>${l.data.split('-').reverse().join('/')}</td>
-        <td>${l.descricao}</td>
-        <td>${isReceita ? '<span class="pill" style="border-color:var(--good-soft);color:var(--good)">receita</span>' : (state.categorias[l.categoriaId]?.nome || '-')}</td>
-        <td>${labelPessoa(l.responsavel)}</td>
-        <td>${isReceita ? '-' : (FORMAS.find(f=>f[0]===l.forma)?.[1]||l.forma)}</td>
-        <td class="num" style="color:${isReceita?'var(--good)':'var(--bad)'}">${isReceita?'+':'-'} ${fmtBRL(l.valor)}</td>
-        <td><button class="secondary small" data-edit-lanc="${id}">editar</button> <button class="danger small" data-del-lanc="${id}">excluir</button></td>
-      </tr>
-    `;}).join('');
 
   const editL = editandoLancamento ? state.lancamentos[editandoLancamento] : null;
 
@@ -675,13 +672,51 @@ function renderLancamentos(){
     </div>
 
     <div class="panel-block">
-      <h2>Últimos lançamentos</h2>
-      <div class="table-wrap">
-      <table>
-        <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Resp.</th><th>Forma</th><th class="num">Valor</th><th></th></tr></thead>
-        <tbody>${lista || '<tr><td colspan="7" class="empty">Nenhum lançamento ainda.</td></tr>'}</tbody>
-      </table>
+      <h2>Lançamentos</h2>
+      <div class="row" style="align-items:flex-end;">
+        <div class="field" style="flex:0 0 auto;"><label>Mês</label>
+          <div style="display:flex; gap:.3em; align-items:center;">
+            <button type="button" class="secondary small" id="f-mes-ant">&lt;</button>
+            <input type="month" id="f-mes" value="${filtroLanc.mes}">
+            <button type="button" class="secondary small" id="f-mes-prox">&gt;</button>
+          </div>
+        </div>
+        <div class="field"><label>O mês se refere a</label>
+          <select id="f-base">
+            <option value="fatura" ${filtroLanc.base==='fatura'?'selected':''}>Mês da fatura</option>
+            <option value="data" ${filtroLanc.base==='data'?'selected':''}>Data da compra</option>
+          </select>
+        </div>
+        <div class="field"><label>Responsável</label>
+          <select id="f-resp"><option value="">Todos</option>${PESSOAS.map(([v,l])=>`<option value="${v}" ${filtroLanc.resp===v?'selected':''}>${l}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Tipo</label>
+          <select id="f-tipo">
+            <option value="">Todos</option>
+            <option value="despesa" ${filtroLanc.tipo==='despesa'?'selected':''}>Despesas</option>
+            <option value="receita" ${filtroLanc.tipo==='receita'?'selected':''}>Receitas</option>
+          </select>
+        </div>
       </div>
+      <div class="row" style="align-items:flex-end;">
+        <div class="field"><label>Categoria</label>
+          <select id="f-cat"><option value="">Todas</option>${Object.entries(state.categorias).map(([id,c])=>`<option value="${id}" ${filtroLanc.cat===id?'selected':''}>${c.nome}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Forma</label>
+          <select id="f-forma"><option value="">Todas</option>${FORMAS.map(([v,l])=>`<option value="${v}" ${filtroLanc.forma===v?'selected':''}>${l}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Cartão</label>
+          <select id="f-cartao"><option value="">Todos</option>${Object.entries(state.cartoes).map(([id,c])=>`<option value="${id}" ${filtroLanc.cartao===id?'selected':''}>${c.nome}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Buscar na descrição</label><input type="text" id="f-q" value="${filtroLanc.q.replace(/"/g,'&quot;')}" style="width:100%"></div>
+      </div>
+      <div style="display:flex; gap:.5em; flex-wrap:wrap; margin-bottom:.4em;">
+        <button type="button" class="secondary small" id="f-mes-atual">Mês atual</button>
+        <button type="button" class="secondary small" id="f-mes-todos">Todos os meses</button>
+        <button type="button" class="secondary small" id="f-limpar">Limpar filtros</button>
+      </div>
+      <p class="hint">Mês da fatura agrupa as parcelas do cartão pelo mês em que cada uma vence na fatura. Data da compra agrupa pelo dia em que a compra foi feita. O filtro Responsável mostra só o que foi lançado para aquela pessoa.</p>
+      <div id="lanc-lista-wrap"></div>
     </div>
   `;
 
@@ -808,19 +843,103 @@ function renderLancamentos(){
     toggleFields();
   });
 
-  el.querySelectorAll('[data-del-lanc]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      if(editandoLancamento===b.dataset.delLanc) editandoLancamento = null;
-      remove(ref(db,'lancamentos/'+b.dataset.delLanc));
+  // ---- lista filtrada e paginada ----
+  const wrap = document.getElementById('lanc-lista-wrap');
+  const desenhaLista = ()=>{
+    const f = filtroLanc;
+    const todos = Object.entries(state.lancamentos)
+      .filter(([id,l])=>{
+        if(f.mes && mesDoLanc(l,f.base)!==f.mes) return false;
+        if(f.resp && l.responsavel!==f.resp) return false;
+        if(f.tipo && (l.tipo||'despesa')!==f.tipo) return false;
+        if(f.cat && l.categoriaId!==f.cat) return false;
+        if(f.forma && l.forma!==f.forma) return false;
+        if(f.cartao && l.cartaoId!==f.cartao) return false;
+        if(f.q && !(l.descricao||'').toLowerCase().includes(f.q.trim().toLowerCase())) return false;
+        return true;
+      })
+      .sort((a,b)=> b[1].data.localeCompare(a[1].data) || (Number(a[1].parcelaAtual||0)-Number(b[1].parcelaAtual||0)));
+
+    const totalDesp = todos.reduce((s,[,l])=> (l.tipo||'despesa')==='despesa' ? s+Number(l.valor||0) : s, 0);
+    const totalRec = todos.reduce((s,[,l])=> l.tipo==='receita' ? s+Number(l.valor||0) : s, 0);
+
+    const paginar = !f.mes;
+    const totalPaginas = paginar ? Math.max(1, Math.ceil(todos.length/POR_PAGINA)) : 1;
+    if(f.pagina>totalPaginas) f.pagina = totalPaginas;
+    const visiveis = paginar ? todos.slice((f.pagina-1)*POR_PAGINA, f.pagina*POR_PAGINA) : todos;
+
+    const linhas = visiveis.map(([id,l])=>{
+      const isReceita = l.tipo==='receita';
+      const cartaoNome = l.cartaoId && state.cartoes[l.cartaoId] ? state.cartoes[l.cartaoId].nome : '';
+      const formaTxt = isReceita ? '-' : (FORMAS.find(x=>x[0]===l.forma)?.[1]||l.forma);
+      const fatura = (!isReceita && l.forma==='credito') ? formatMesAno(l.competencia) : '-';
+      return `
+      <tr>
+        <td>${l.data.split('-').reverse().join('/')}</td>
+        <td>${l.descricao}</td>
+        <td>${isReceita ? '<span class="pill" style="border-color:var(--good-soft);color:var(--good)">receita</span>' : (state.categorias[l.categoriaId]?.nome || '-')}</td>
+        <td>${labelPessoa(l.responsavel)}</td>
+        <td>${formaTxt}${cartaoNome && !isReceita ? `<div class="hint">${cartaoNome}</div>` : ''}</td>
+        <td class="num">${fatura}</td>
+        <td class="num" style="color:${isReceita?'var(--good)':'var(--bad)'}">${isReceita?'+':'-'} ${fmtBRL(l.valor)}</td>
+        <td><button class="secondary small" data-edit-lanc="${id}">editar</button> <button class="danger small" data-del-lanc="${id}">excluir</button></td>
+      </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <div class="cards-grid" style="margin:1em 0;">
+        <div class="stat-card"><div class="label">Lançamentos</div><div class="value">${todos.length}</div></div>
+        <div class="stat-card bad"><div class="label">Despesas</div><div class="value">${fmtBRL(totalDesp)}</div></div>
+        <div class="stat-card good"><div class="label">Receitas</div><div class="value">${fmtBRL(totalRec)}</div></div>
+      </div>
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Resp.</th><th>Forma</th><th class="num">Fatura</th><th class="num">Valor</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="8" class="empty">Nenhum lançamento com esses filtros.</td></tr>'}</tbody>
+      </table>
+      </div>
+      ${paginar && totalPaginas>1 ? `
+      <div style="display:flex; gap:.8em; align-items:center; margin-top:.8em;">
+        <button type="button" class="secondary small" id="f-pag-ant" ${f.pagina<=1?'disabled':''}>Anterior</button>
+        <span class="hint" style="margin:0;">Página ${f.pagina} de ${totalPaginas}</span>
+        <button type="button" class="secondary small" id="f-pag-prox" ${f.pagina>=totalPaginas?'disabled':''}>Próxima</button>
+      </div>` : ''}
+    `;
+
+    wrap.querySelectorAll('[data-del-lanc]').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        if(editandoLancamento===b.dataset.delLanc) editandoLancamento = null;
+        remove(ref(db,'lancamentos/'+b.dataset.delLanc));
+      });
     });
-  });
-  el.querySelectorAll('[data-edit-lanc]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      editandoLancamento = b.dataset.editLanc;
-      renderLancamentos();
-      document.getElementById('form-lancamento').scrollIntoView({behavior:'smooth', block:'start'});
+    wrap.querySelectorAll('[data-edit-lanc]').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        editandoLancamento = b.dataset.editLanc;
+        renderLancamentos();
+        document.getElementById('form-lancamento').scrollIntoView({behavior:'smooth', block:'start'});
+      });
     });
+    document.getElementById('f-pag-ant')?.addEventListener('click', ()=>{ filtroLanc.pagina--; desenhaLista(); });
+    document.getElementById('f-pag-prox')?.addEventListener('click', ()=>{ filtroLanc.pagina++; desenhaLista(); });
+  };
+
+  const mesInput = document.getElementById('f-mes');
+  const aplicaMes = (ym)=>{ filtroLanc.mes = ym; filtroLanc.pagina = 1; mesInput.value = ym; desenhaLista(); };
+  mesInput.addEventListener('change', ()=> aplicaMes(mesInput.value));
+  document.getElementById('f-mes-ant').addEventListener('click', ()=> aplicaMes(somaMes(filtroLanc.mes || mesAtual(), -1)));
+  document.getElementById('f-mes-prox').addEventListener('click', ()=> aplicaMes(somaMes(filtroLanc.mes || mesAtual(), 1)));
+  document.getElementById('f-mes-atual').addEventListener('click', ()=> aplicaMes(mesAtual()));
+  document.getElementById('f-mes-todos').addEventListener('click', ()=> aplicaMes(''));
+  [['f-base','base'],['f-resp','resp'],['f-tipo','tipo'],['f-cat','cat'],['f-forma','forma'],['f-cartao','cartao']].forEach(([id,chave])=>{
+    document.getElementById(id).addEventListener('change', e=>{ filtroLanc[chave] = e.target.value; filtroLanc.pagina = 1; desenhaLista(); });
   });
+  document.getElementById('f-q').addEventListener('input', e=>{ filtroLanc.q = e.target.value; filtroLanc.pagina = 1; desenhaLista(); });
+  document.getElementById('f-limpar').addEventListener('click', ()=>{
+    Object.assign(filtroLanc, { base:'fatura', mes:mesAtual(), resp:'', tipo:'', cat:'', forma:'', cartao:'', q:'', pagina:1 });
+    renderLancamentos();
+  });
+  desenhaLista();
+
   document.getElementById('btn-cancelar-edicao-lanc')?.addEventListener('click', ()=>{
     editandoLancamento = null;
     renderLancamentos();
