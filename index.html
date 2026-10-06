@@ -1015,17 +1015,13 @@ function totalContasFixasMes(mes, indiceRelativo){
 // Gera N lançamentos mensais (um por mês, a partir do mês atual) para uma
 // mensalidade ou financiamento com prazo para acabar. Usado tanto na
 // conversão de contas fixas antigas quanto na importação da planilha.
-function gerarParcelasFixas({descricao, valor, categoriaId, responsavel, forma, cartaoId, diaVencimento, nParcelas}){
+function gerarParcelasFixas({descricao, valor, categoriaId, responsavel, forma, cartaoId, nParcelas}){
   for(let i=0;i<nParcelas;i++){
-    const d = new Date(); d.setMonth(d.getMonth()+i);
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()+i);
     const mes = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    const data = `${mes}-${String(diaVencimento||5).padStart(2,'0')}`;
-    let competencia = mes;
-    if(forma==='credito' && cartaoId && state.cartoes[cartaoId]){
-      competencia = gerarCompetencias(data, Number(state.cartoes[cartaoId].diaFechamento), 1)[0];
-    }
+    const data = i===0 ? hoje() : `${mes}-01`;
     push(ref(db,'lancamentos'), {
-      tipo:'despesa', data, competencia,
+      tipo:'despesa', data, competencia:mes,
       descricao: `${descricao} (${i+1}/${nParcelas})`,
       valor: Number(valor), categoriaId: categoriaId||'', responsavel, forma, cartaoId: cartaoId||'',
       parcelaAtual: i+1, parcelaTotal: nParcelas,
@@ -1117,7 +1113,7 @@ function importarDadosPlanilha(){
   parcelas.forEach(([descricao,responsavel,valor,endMonth])=>{
     const nParcelas = mesesRestantesAte(endMonth);
     if(nParcelas>0){
-      gerarParcelasFixas({ descricao, valor, categoriaId:'', responsavel, forma:'debito', cartaoId:'', diaVencimento:5, nParcelas });
+      gerarParcelasFixas({ descricao, valor, categoriaId:'', responsavel, forma:'debito', cartaoId:'', nParcelas });
     }
   });
 
@@ -1130,7 +1126,7 @@ function importarDadosPlanilha(){
   recorrentes.forEach(([descricao,responsavel,valor])=>{
     push(ref(db,'contasFixas'), {
       descricao, valor, responsavel, tipo:'recorrente', mesesRestantes:0,
-      diaVencimento:5, categoriaId:'', forma:'debito', cartaoId:'', geradoEm:{}
+      categoriaId:'', forma:'debito', cartaoId:'', geradoEm:{}
     });
   });
 
@@ -1138,7 +1134,7 @@ function importarDadosPlanilha(){
 
   update(ref(db,'casamento'), { dataCasamento:'2027-08-22', metaReservaMensal:3693.28 });
 
-  alert('Pronto. As mensalidades já entraram como lançamentos (aba Lançamentos) e as despesas recorrentes entraram em Contas fixas. O dia de vencimento veio como dia 5, um padrão, ajuste o que for diferente.');
+  alert('Pronto. As mensalidades já entraram como lançamentos (aba Lançamentos) e as despesas recorrentes entraram em Contas fixas. Ajuste categoria, responsável e forma de pagamento do que for diferente.');
 }
 
 let editandoMeta = null;
@@ -1311,7 +1307,6 @@ function renderContasFixas(el){
       return `<tr>
         <td>${r.descricao}<div class="hint">${ehMensalidadeAntiga?'Mensalidade (antiga)':'Despesa fixa'} · ${labelPessoa(r.responsavel)} · ${FORMAS.find(f=>f[0]===r.forma)?.[1]||r.forma}${r.categoriaId&&state.categorias[r.categoriaId]?' · '+state.categorias[r.categoriaId].nome:''}</div></td>
         <td><input type="number" class="num" style="width:90px" step="0.01" data-fixa="${id}" data-campo="valor" value="${r.valor}"></td>
-        <td><input type="number" class="num" style="width:55px" data-fixa="${id}" data-campo="diaVencimento" value="${r.diaVencimento}" min="1" max="31"></td>
         <td class="num">${ehMensalidadeAntiga ? `<input type="number" class="num" style="width:55px" data-fixa="${id}" data-campo="mesesRestantes" value="${r.mesesRestantes}" min="0">` : '-'}</td>
         <td>${statusHtml}</td>
         <td>${ehMensalidadeAntiga && !finalizada ? `<button class="secondary small" data-converter-fixa="${id}">converter em lançamentos</button> ` : ''}<button class="secondary small" data-edit-fixa="${id}">editar</button> <button class="danger small" data-del-fixa="${id}">excluir</button></td>
@@ -1330,9 +1325,8 @@ function renderContasFixas(el){
         <div class="row">
           <div class="field"><label>Descrição</label><input type="text" name="descricao" value="${editF?editF.descricao.replace(/"/g,'&quot;'):''}" required></div>
           <div class="field"><label>Valor mensal (R$)</label><input type="number" step="0.01" name="valor" value="${editF?editF.valor:''}" required></div>
-          <div class="field"><label>Dia do mês (aproximado)</label><input type="number" name="diaVencimento" min="1" max="31" value="${editF?editF.diaVencimento:5}"></div>
         </div>
-        <p class="hint">Não precisa ser exato, é só pra organizar em qual fatura do cartão a despesa cai (quando for no crédito) e em que dia do mês ela normalmente acontece. Se não souber, deixe o padrão e ajuste depois na lista abaixo.</p>
+        <p class="hint">Ao clicar em "Gerar lançamentos do mês", a conta entra na fatura do mês atual (no crédito) ou nos gastos do mês (débito e PIX).</p>
         <div class="row">
           <div class="field"><label>Categoria</label><select name="categoriaId"><option value="">(sem categoria)</option>${Object.entries(state.categorias).map(([id,c])=>`<option value="${id}" ${editF&&editF.categoriaId===id?'selected':''}>${c.nome}</option>`).join('')}</select></div>
           <div class="field"><label>Responsável</label><select name="responsavel">${PESSOAS.map(([v,l])=>`<option value="${v}" ${editF&&editF.responsavel===v?'selected':''}>${l}</option>`).join('')}</select></div>
@@ -1352,10 +1346,10 @@ function renderContasFixas(el){
         <h2 style="border:none;">Contas fixas cadastradas</h2>
         <button id="btn-gerar-mes" class="secondary">Gerar lançamentos do mês</button>
       </div>
-      <p class="hint">Valor, dia de vencimento e meses restantes salvam ao sair do campo. Use "editar" pra mudar descrição, categoria, responsável, forma ou cartão.${temMensalidadeAntiga ? ' Use "converter em lançamentos" nas mensalidades antigas abaixo para já gerar de uma vez todas as parcelas que faltam, sem precisar clicar todo mês.' : ''}</p>
+      <p class="hint">Valor e meses restantes salvam ao sair do campo. Use "editar" pra mudar descrição, categoria, responsável, forma ou cartão.${temMensalidadeAntiga ? ' Use "converter em lançamentos" nas mensalidades antigas abaixo para já gerar de uma vez todas as parcelas que faltam, sem precisar clicar todo mês.' : ''}</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Descrição</th><th class="num">Valor</th><th class="num">Vence</th><th class="num">Meses</th><th>Status</th><th></th></tr></thead>
-        <tbody>${linhas || '<tr><td colspan="6" class="empty">Nenhuma conta fixa cadastrada.</td></tr>'}</tbody>
+        <thead><tr><th>Descrição</th><th class="num">Valor</th><th class="num">Meses</th><th>Status</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="5" class="empty">Nenhuma conta fixa cadastrada.</td></tr>'}</tbody>
       </table></div>
     </div>
   `;
@@ -1372,7 +1366,7 @@ function renderContasFixas(el){
     const fd = new FormData(e.target);
     const dados = {
       descricao:fd.get('descricao'), valor:Number(fd.get('valor')),
-      diaVencimento:Number(fd.get('diaVencimento'))||5, categoriaId:fd.get('categoriaId')||'',
+      categoriaId:fd.get('categoriaId')||'',
       responsavel:fd.get('responsavel'), forma:fd.get('forma'), cartaoId:fd.get('cartaoId')||''
     };
     if(editandoFixa){
@@ -1405,13 +1399,8 @@ function renderContasFixas(el){
     Object.entries(state.contasFixas).forEach(([id,r])=>{
       if(r.geradoEm && r.geradoEm[comp]) return;
       if(r.tipo==='parcela' && Number(r.mesesRestantes||0)<=0) return;
-      const data = `${comp}-${String(r.diaVencimento).padStart(2,'0')}`;
-      let competencia = comp;
-      if(r.forma==='credito' && r.cartaoId && state.cartoes[r.cartaoId]){
-        competencia = gerarCompetencias(data, Number(state.cartoes[r.cartaoId].diaFechamento), 1)[0];
-      }
       push(ref(db,'lancamentos'), {
-        tipo:'despesa', data, competencia, descricao:r.descricao, valor:Number(r.valor),
+        tipo:'despesa', data:hoje(), competencia:comp, descricao:r.descricao, valor:Number(r.valor),
         categoriaId:r.categoriaId, responsavel:r.responsavel, forma:r.forma, cartaoId:r.cartaoId||'',
         parcelaAtual:1, parcelaTotal:1,
         divisaoModo:'proporcional', percPedro:50, percSofia:50
@@ -1435,7 +1424,7 @@ function renderContasFixas(el){
       gerarParcelasFixas({
         descricao:r.descricao, valor:r.valor, categoriaId:r.categoriaId,
         responsavel:r.responsavel, forma:r.forma, cartaoId:r.cartaoId,
-        diaVencimento:r.diaVencimento, nParcelas
+        nParcelas
       });
       remove(ref(db,'contasFixas/'+id));
     });
